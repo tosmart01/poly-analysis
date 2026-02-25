@@ -1,6 +1,15 @@
 # analysis-poly
 
+![PnL](assets/pnl.png)
+![Ratio](assets/ratio.png)
+
 Polymarket real-profit analyzer with a web UI.
+
+## Scope (Important)
+
+- This tool is primarily designed for Polymarket crypto `updown` markets with taker fees, especially `5m` and `15m` intervals.
+- It is **not** intended as a universal PnL engine for all Polymarket market types.
+- Main purpose: quantify and visualize the impact of trading fees on real profitability (`Net PnL` vs `No-Fee PnL`).
 
 ## Run
 
