@@ -1,7 +1,11 @@
 # analysis-poly
 
+**Real Profit (Fee-Excluded View)**
+
 ![PnL](assets/pnl.png)
 ![Ratio](assets/ratio.png)
+
+中文说明见：[README_zh.md](README_zh.md)
 
 Polymarket real-profit analyzer with a web UI.
 
