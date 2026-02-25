@@ -1,0 +1,27 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+!static/dist/
+!static/dist/app.js
+!static/dist/app.css
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Runtime outputs
+reports/*.json
+reports/*.csv
+.cache/
+node_modules/
+
+# Local/editor files
+.idea/
+.jbeval/
+.pytest_cache/
+.python-version
+.DS_Store
+*.log
