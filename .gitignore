@@ -3,9 +3,6 @@ __pycache__/
 *.py[oc]
 build/
 dist/
-!static/dist/
-!static/dist/app.js
-!static/dist/app.css
 !app/static/dist/
 !app/static/dist/app.js
 !app/static/dist/app.css
@@ -27,3 +24,4 @@ node_modules/
 .pytest_cache/
 .DS_Store
 *.log
+app/reports/

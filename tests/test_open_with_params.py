@@ -1,6 +1,6 @@
 import argparse
 
-from open_with_params import _build_bootstrap_query, _build_browser_url, _to_datetime_text
+from app.open_with_params import _build_bootstrap_query, _build_browser_url, _to_datetime_text
 
 
 def _args(**kwargs):

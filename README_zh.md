@@ -47,7 +47,7 @@ uv run python main.py
 使用独立脚本启动服务、打开浏览器，并把参数放进 URL：
 
 ```bash
-uv run python open_with_params.py \
+uv run -m app.open_with_params \
   --address 0xabc \
   --symbols btc,eth \
   --intervals 5,15 \
@@ -60,7 +60,7 @@ uv run python open_with_params.py \
 
 ## 首次拉取说明
 
-仓库已提交 `static/dist` 构建产物，首次启动不需要先构建前端。
+仓库已提交 `app/static/dist` 构建产物，首次启动不需要先构建前端。
 
 如果你修改了 `frontend/src`，需要重新构建：
 
@@ -86,4 +86,4 @@ uv run pytest
 ## 前端
 
 - 源码：`frontend/src`
-- 构建产物：`static/dist/app.js`、`static/dist/app.css`
+- 构建产物：`app/static/dist/app.js`、`app/static/dist/app.css`

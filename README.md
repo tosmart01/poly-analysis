@@ -49,7 +49,7 @@ Open [http://localhost:8000](http://localhost:8000).
 Use a standalone script to start server, open browser, and pass params in URL.
 
 ```bash
-uv run python open_with_params.py \
+uv run -m app.open_with_params \
   --address 0xabc \
   --symbols btc,eth \
   --intervals 5,15 \
@@ -62,7 +62,7 @@ Frontend will read query params, fill form fields, and auto start the run.
 
 ## First Clone
 
-`static/dist` is committed in the repository, so first startup does not require front-end build.
+`app/static/dist` is committed in the repository, so first startup does not require front-end build.
 
 If you modify `frontend/src`, rebuild assets:
 
@@ -88,4 +88,4 @@ uv run pytest
 ## Frontend
 
 - Source: `frontend/src`
-- Build output: `static/dist/app.js` and `static/dist/app.css`
+- Build output: `app/static/dist/app.js` and `app/static/dist/app.css`

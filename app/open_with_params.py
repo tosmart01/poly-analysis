@@ -9,8 +9,16 @@ import urllib.request
 import webbrowser
 from datetime import datetime
 
-from .logging_config import configure_logging
-from .web import app
+if __package__ in (None, ""):
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from app.logging_config import configure_logging
+    from app.web import app
+else:
+    from .logging_config import configure_logging
+    from .web import app
 
 
 def _to_datetime_text(unix_ts: int) -> str:
@@ -130,3 +138,6 @@ def main() -> None:
 
     uvicorn.run(app, host=args.host, port=args.port)
 
+
+if __name__ == "__main__":
+    main()

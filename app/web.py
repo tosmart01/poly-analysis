@@ -14,18 +14,8 @@ from .models import AnalysisRequest, RunCreated, RunState, RunStopAck
 from .run_manager import RunManager
 
 PACKAGE_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = PACKAGE_DIR.parent
-
-
-def _resolve_resource_dir(name: str) -> Path:
-    dev_path = PROJECT_ROOT / name
-    if dev_path.exists():
-        return dev_path
-    return PACKAGE_DIR / name
-
-
-TEMPLATES_DIR = _resolve_resource_dir("templates")
-STATIC_DIR = _resolve_resource_dir("static")
+TEMPLATES_DIR = PACKAGE_DIR / "templates"
+STATIC_DIR = PACKAGE_DIR / "static"
 REPORTS_DIR = Path(os.getenv("ANALYSIS_POLY_REPORTS_DIR", "reports")).expanduser().resolve()
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 configure_logging()

@@ -2,8 +2,14 @@ from __future__ import annotations
 
 import argparse
 
-from .logging_config import configure_logging
-from .web import app
+if __package__ in (None, ""):
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from app.main import run
+else:
+    from .main import run
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -14,9 +20,9 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
-    import uvicorn
-
     args = _build_arg_parser().parse_args()
-    configure_logging()
-    uvicorn.run(app, host=args.host, port=args.port)
+    run(host=args.host, port=args.port)
 
+
+if __name__ == "__main__":
+    main()
