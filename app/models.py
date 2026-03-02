@@ -34,8 +34,8 @@ class AnalysisRequest(BaseModel):
     @classmethod
     def validate_address(cls, value: str) -> str:
         lowered = value.lower().strip()
-        if not lowered.startswith("0x") or len(lowered) != 42:
-            raise ValueError("address must be a hex EVM address")
+        if not lowered.startswith("0x"):
+            raise ValueError("address must start with 0x")
         return lowered
 
     @field_validator("symbols")

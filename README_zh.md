@@ -22,6 +22,22 @@ uv run python main.py
 
 打开 [http://localhost:8000](http://localhost:8000)。
 
+## 命令行打开并自动启动
+
+使用独立脚本启动服务、打开浏览器，并把参数放进 URL：
+
+```bash
+uv run python open_with_params.py \
+  --address 0xabc \
+  --symbols btc,eth \
+  --intervals 5,15 \
+  --start-time "2026-03-01 00:00" \
+  --end-time "2026-03-02 00:00" \
+  --concurrency 8
+```
+
+前端会读取 URL 参数，自动填充表单并直接启动。
+
 ## 首次拉取说明
 
 仓库已提交 `static/dist` 构建产物，首次启动不需要先构建前端。

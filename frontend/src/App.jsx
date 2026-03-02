@@ -83,6 +83,55 @@ function hasTradeActivity(market) {
   return tokens.some((token) => Number(token.trade_count || 0) > 0);
 }
 
+function isTruthyQueryFlag(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+function parseBootstrapFromQuery(searchText) {
+  const params = new URLSearchParams(searchText || "");
+  const patch = {};
+
+  const fieldMap = {
+    address: "address",
+    symbols: "symbols",
+    intervals: "intervals",
+    start_time: "startTime",
+    end_time: "endTime",
+    fee_rate_bps: "feeRateBps",
+    missing_cost_warn_qty: "missingCostWarnQty",
+    maker_reward_ratio: "makerRewardRatio",
+    concurrency: "concurrency",
+    page_limit: "pageLimit",
+  };
+
+  Object.entries(fieldMap).forEach(([queryKey, formKey]) => {
+    const value = params.get(queryKey);
+    if (value !== null && String(value).trim() !== "") {
+      patch[formKey] = value;
+    }
+  });
+
+  if (!patch.startTime) {
+    const startTs = Number(params.get("start_ts"));
+    if (Number.isFinite(startTs) && startTs > 0) {
+      patch.startTime = toDateTimeText(new Date(startTs * 1000));
+    }
+  }
+
+  if (!patch.endTime) {
+    const endTs = Number(params.get("end_ts"));
+    if (Number.isFinite(endTs) && endTs > 0) {
+      patch.endTime = toDateTimeText(new Date(endTs * 1000));
+    }
+  }
+
+  const autoStart = isTruthyQueryFlag(params.get("auto_start"));
+  return { patch, autoStart };
+}
+
 export default function App({ serverDefaults }) {
   const [formData, setFormData] = useState(() => buildDefaultForm(serverDefaults));
   const [runId, setRunId] = useState(null);
@@ -103,6 +152,7 @@ export default function App({ serverDefaults }) {
   const [drawdownMarkers, setDrawdownMarkers] = useState([]);
 
   const eventSourceRef = useRef(null);
+  const bootstrapHandledRef = useRef(false);
   const totalByTsRef = useRef(new Map());
   const symbolByTsRef = useRef(new Map());
   const totalByTsNoFeeRef = useRef(new Map());
@@ -127,6 +177,28 @@ export default function App({ serverDefaults }) {
     },
     [],
   );
+
+  useEffect(() => {
+    if (bootstrapHandledRef.current) {
+      return;
+    }
+    bootstrapHandledRef.current = true;
+
+    const { patch, autoStart } = parseBootstrapFromQuery(window.location.search);
+    if (!Object.keys(patch).length) {
+      return;
+    }
+
+    setFormData((prev) => {
+      const merged = { ...prev, ...patch };
+      if (autoStart) {
+        setTimeout(() => {
+          handleStart(merged);
+        }, 0);
+      }
+      return merged;
+    });
+  }, []);
 
   const roi = useMemo(() => {
     const base =
@@ -438,39 +510,39 @@ export default function App({ serverDefaults }) {
     });
   }
 
-  function buildPayload() {
-    const startTs = parseDateTimeTextToUnixSeconds(formData.startTime);
-    const endTs = parseDateTimeTextToUnixSeconds(formData.endTime);
+  function buildPayload(sourceFormData = formData) {
+    const startTs = parseDateTimeTextToUnixSeconds(sourceFormData.startTime);
+    const endTs = parseDateTimeTextToUnixSeconds(sourceFormData.endTime);
     if (startTs >= endTs) {
       throw new Error("end time must be later than start time");
     }
 
     return {
-      address: formData.address.trim(),
+      address: sourceFormData.address.trim(),
       start_ts: startTs,
       end_ts: endTs,
-      symbols: formData.symbols
+      symbols: sourceFormData.symbols
         .split(",")
         .map((item) => item.trim().toLowerCase())
         .filter(Boolean),
-      intervals: formData.intervals
+      intervals: sourceFormData.intervals
         .split(",")
         .map((item) => Number(item.trim()))
         .filter((value) => Number.isFinite(value) && value > 0),
-      fee_rate_bps: Number(formData.feeRateBps),
-      missing_cost_warn_qty: Number(formData.missingCostWarnQty),
-      maker_reward_ratio: Number(formData.makerRewardRatio),
-      concurrency: Number(formData.concurrency),
-      page_limit: Number(formData.pageLimit),
+      fee_rate_bps: Number(sourceFormData.feeRateBps),
+      missing_cost_warn_qty: Number(sourceFormData.missingCostWarnQty),
+      maker_reward_ratio: Number(sourceFormData.makerRewardRatio),
+      concurrency: Number(sourceFormData.concurrency),
+      page_limit: Number(sourceFormData.pageLimit),
       request_timeout_sec: 20,
       output_dir: "reports",
     };
   }
 
-  async function handleStart() {
+  async function handleStart(overrideFormData = null) {
     try {
       clearRunData();
-      const payload = buildPayload();
+      const payload = buildPayload(overrideFormData || formData);
       const created = await createRun(payload);
 
       setRunId(created.run_id);
