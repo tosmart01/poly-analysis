@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "build": "esbuild frontend/src/main.jsx --bundle --format=esm --target=es2020 --outfile=app/static/dist/app.js --jsx=automatic --loader:.jsx=jsx --minify"
+    "build": "esbuild frontend/src/main.jsx --bundle --format=esm --target=es2020 --outfile=analysis_poly/static/dist/app.js --jsx=automatic --loader:.jsx=jsx --minify"
   },
   "dependencies": {
     "@ant-design/icons": "^5.6.1",

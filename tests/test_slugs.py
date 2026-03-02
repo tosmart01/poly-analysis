@@ -1,4 +1,4 @@
-from app.slugs import generate_market_slug_specs
+from analysis_poly.slugs import generate_market_slug_specs
 
 
 def test_slug_generation_ceil_start_open_end():

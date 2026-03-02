@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
-from app.models import ActivityRecord, PolymarketMarket, TradeRecord
-from app.profit_engine import ProfitEngine, _fee_adjust
+from analysis_poly.models import ActivityRecord, PolymarketMarket, TradeRecord
+from analysis_poly.profit_engine import ProfitEngine, _fee_adjust
 
 
 def test_fee_adjust_basic():

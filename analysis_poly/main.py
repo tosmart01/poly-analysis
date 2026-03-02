@@ -5,8 +5,8 @@ if __package__ in (None, ""):
     from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from app.logging_config import configure_logging
-    from app.web import app
+    from analysis_poly.logging_config import configure_logging
+    from analysis_poly.web import app
 else:
     from .logging_config import configure_logging
     from .web import app

@@ -1,5 +1,5 @@
-from app.analyzer import _has_market_trade_activity
-from app.models import MarketReport, TokenReport
+from analysis_poly.analyzer import _has_market_trade_activity
+from analysis_poly.models import MarketReport, TokenReport
 
 
 def test_has_market_trade_activity_false_for_no_trade_tokens():

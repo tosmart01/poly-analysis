@@ -7,7 +7,7 @@ if __package__ in (None, ""):
     from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from app.main import run
+    from analysis_poly.main import run
 else:
     from .main import run
 

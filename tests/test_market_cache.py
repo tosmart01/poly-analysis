@@ -1,5 +1,5 @@
-from app.market_cache import MarketMetadataCache
-from app.models import PolymarketMarket
+from analysis_poly.market_cache import MarketMetadataCache
+from analysis_poly.models import PolymarketMarket
 
 
 def test_market_cache_eligibility():

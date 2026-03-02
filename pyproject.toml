@@ -18,8 +18,8 @@ dependencies = [
 ]
 
 [project.scripts]
-analysis-poly = "app.cli:main"
-analysis-poly-open = "app.open_with_params:main"
+analysis-poly = "analysis_poly.cli:main"
+analysis-poly-open = "analysis_poly.open_with_params:main"
 
 [project.optional-dependencies]
 dev = [
@@ -31,10 +31,10 @@ dev = [
 include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["app*"]
+include = ["analysis_poly*"]
 
 [tool.setuptools.package-data]
-app = [
+analysis_poly = [
     "templates/*.html",
     "static/dist/*.js",
     "static/dist/*.css",
@@ -43,3 +43,8 @@ app = [
 [tool.pytest.ini_options]
 pythonpath = ["."]
 addopts = "-q"
+
+[dependency-groups]
+dev = [
+    "build>=1.4.0",
+]

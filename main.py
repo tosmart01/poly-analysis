@@ -1,4 +1,4 @@
-from app.main import main
+from analysis_poly.main import main
 
 
 if __name__ == "__main__":

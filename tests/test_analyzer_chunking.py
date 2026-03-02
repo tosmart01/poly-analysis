@@ -1,5 +1,5 @@
-from app.analyzer import _chunk_specs_by_timestamp, _is_market_result_cache_eligible
-from app.slugs import MarketSlugSpec
+from analysis_poly.analyzer import _chunk_specs_by_timestamp, _is_market_result_cache_eligible
+from analysis_poly.slugs import MarketSlugSpec
 
 
 def test_chunk_specs_by_timestamp_keeps_same_timestamp_together():

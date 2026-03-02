@@ -1,6 +1,6 @@
 import pytest
 
-from app.models import AnalysisRequest
+from analysis_poly.models import AnalysisRequest
 
 
 def test_analysis_request_default_concurrency_is_5():

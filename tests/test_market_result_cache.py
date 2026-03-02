@@ -1,4 +1,4 @@
-from app.market_result_cache import AddressMarketResultCache
+from analysis_poly.market_result_cache import AddressMarketResultCache
 
 
 def test_address_market_result_cache_roundtrip(tmp_path):

@@ -3,8 +3,8 @@ import asyncio
 import pytest
 from fastapi import HTTPException
 
-from app.models import AnalysisReport, AnalysisRequest, SummaryStats
-from app.run_manager import RunManager
+from analysis_poly.models import AnalysisReport, AnalysisRequest, SummaryStats
+from analysis_poly.run_manager import RunManager
 
 
 def test_single_run_lock_conflict(monkeypatch):

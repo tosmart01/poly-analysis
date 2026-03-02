@@ -1,8 +1,8 @@
 import asyncio
 
-from app.analyzer import PolymarketProfitAnalyzer, _market_order_key
-from app.market_cache import MarketMetadataCache
-from app.models import PolymarketMarket
+from analysis_poly.analyzer import PolymarketProfitAnalyzer, _market_order_key
+from analysis_poly.market_cache import MarketMetadataCache
+from analysis_poly.models import PolymarketMarket
 
 
 class _FakeClient:

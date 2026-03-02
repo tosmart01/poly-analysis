@@ -3,9 +3,9 @@ __pycache__/
 *.py[oc]
 build/
 dist/
-!app/static/dist/
-!app/static/dist/app.js
-!app/static/dist/app.css
+!analysis_poly/static/dist/
+!analysis_poly/static/dist/app.js
+!analysis_poly/static/dist/app.css
 wheels/
 *.egg-info
 
@@ -24,4 +24,5 @@ node_modules/
 .pytest_cache/
 .DS_Store
 *.log
-app/reports/
+analysis_poly/reports/
+analysis_poly/.cache/
