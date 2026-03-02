@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -12,12 +13,21 @@ from .logging_config import configure_logging
 from .models import AnalysisRequest, RunCreated, RunState, RunStopAck
 from .run_manager import RunManager
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-TEMPLATES_DIR = BASE_DIR / "templates"
-REPORTS_DIR = BASE_DIR / "reports"
-STATIC_DIR = BASE_DIR / "static"
-REPORTS_DIR.mkdir(exist_ok=True)
-STATIC_DIR.mkdir(exist_ok=True)
+PACKAGE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = PACKAGE_DIR.parent
+
+
+def _resolve_resource_dir(name: str) -> Path:
+    dev_path = PROJECT_ROOT / name
+    if dev_path.exists():
+        return dev_path
+    return PACKAGE_DIR / name
+
+
+TEMPLATES_DIR = _resolve_resource_dir("templates")
+STATIC_DIR = _resolve_resource_dir("static")
+REPORTS_DIR = Path(os.getenv("ANALYSIS_POLY_REPORTS_DIR", "reports")).expanduser().resolve()
+REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 configure_logging()
 
 app = FastAPI(title="Polymarket Profit Analyzer")

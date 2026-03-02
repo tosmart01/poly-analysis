@@ -6,6 +6,9 @@ dist/
 !static/dist/
 !static/dist/app.js
 !static/dist/app.css
+!app/static/dist/
+!app/static/dist/app.js
+!app/static/dist/app.css
 wheels/
 *.egg-info
 

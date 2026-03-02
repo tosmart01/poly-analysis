@@ -20,6 +20,21 @@ Polymarket real-profit analyzer with a web UI.
 - Python `3.11+` (recommended: `3.11`)
 - `uv` package manager
 
+## Install As Package
+
+```bash
+uv pip install .
+# or
+pip install .
+```
+
+After install:
+
+```bash
+analysis-poly
+analysis-poly-open --address 0xabc --symbols btc,eth --intervals 5,15
+```
+
 ## Run
 
 ```bash

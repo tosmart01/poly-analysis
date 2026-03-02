@@ -18,6 +18,21 @@ Polymarket 真实利润分析 Web 工具。
 - Python `3.11+`（推荐使用 `3.11`）
 - `uv` 包管理器
 
+## 作为独立包安装
+
+```bash
+uv pip install .
+# 或
+pip install .
+```
+
+安装后可直接运行：
+
+```bash
+analysis-poly
+analysis-poly-open --address 0xabc --symbols btc,eth --intervals 5,15
+```
+
 ## 启动
 
 ```bash

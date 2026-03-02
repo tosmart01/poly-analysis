@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "analysis-poly"
 version = "0.1.0"
@@ -13,10 +17,27 @@ dependencies = [
     "uvicorn>=0.35.0",
 ]
 
+[project.scripts]
+analysis-poly = "app.cli:main"
+analysis-poly-open = "app.open_with_params:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.3.4",
     "pytest-asyncio>=0.24.0",
+]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.setuptools.package-data]
+app = [
+    "templates/*.html",
+    "static/dist/*.js",
+    "static/dist/*.css",
 ]
 
 [tool.pytest.ini_options]
