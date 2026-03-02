@@ -11,9 +11,25 @@ import { createRun, fetchRunResult, stopRun } from "./services/api";
 import { parseDateTimeTextToUnixSeconds, toDateTimeText } from "./utils/dateTime";
 
 const IDLE_WARNING = "No warnings. Strategy is running with live market aggregation.";
+const MAX_DRAWDOWN_MARKERS = 8;
+const MIN_DRAWDOWN_DELTA_USDC = 0.5;
 
-function extractSymbol(marketSlug) {
-  return String(marketSlug || "").split("-")[0] || "unknown";
+function extractMarketPrefix(marketSlug) {
+  const raw = String(marketSlug || "").trim().toLowerCase();
+  if (!raw) {
+    return "unknown";
+  }
+
+  const parts = raw.split("-").filter(Boolean);
+  if (parts.length >= 3) {
+    const interval = parts[2].endsWith("m") ? parts[2].slice(0, -1) : parts[2];
+    if (parts[1] === "updown") {
+      return `${parts[0]}-${interval}`;
+    }
+    return `${parts[0]}-${parts[1]}-${interval}`;
+  }
+
+  return parts[0] || "unknown";
 }
 
 function reduceCurveDelta(points) {
@@ -24,6 +40,42 @@ function reduceCurveDelta(points) {
     byTs.set(ts, (byTs.get(ts) || 0) + delta);
   }
   return byTs;
+}
+
+function buildDrawdownMarkers(marketCurves) {
+  const worstDropBySlug = new Map();
+
+  Object.entries(marketCurves || {}).forEach(([marketSlug, points]) => {
+    const byTs = reduceCurveDelta(points);
+    const timestamps = [...byTs.keys()].sort((a, b) => a - b);
+    if (!timestamps.length) {
+      return;
+    }
+
+    let worst = null;
+    timestamps.forEach((ts) => {
+      const delta = Number(byTs.get(ts) || 0);
+      if (delta >= -MIN_DRAWDOWN_DELTA_USDC) {
+        return;
+      }
+      if (!worst || delta < worst.delta) {
+        worst = {
+          ts,
+          delta,
+          marketSlug,
+          marketPrefix: extractMarketPrefix(marketSlug),
+        };
+      }
+    });
+
+    if (worst) {
+      worstDropBySlug.set(marketSlug, worst);
+    }
+  });
+
+  return [...worstDropBySlug.values()]
+    .sort((a, b) => a.delta - b.delta)
+    .slice(0, MAX_DRAWDOWN_MARKERS);
 }
 
 function hasTradeActivity(market) {
@@ -48,6 +100,7 @@ export default function App({ serverDefaults }) {
   const [totalSeriesNoFee, setTotalSeriesNoFee] = useState([]);
   const [symbolSeries, setSymbolSeries] = useState({});
   const [symbolSeriesNoFee, setSymbolSeriesNoFee] = useState({});
+  const [drawdownMarkers, setDrawdownMarkers] = useState([]);
 
   const eventSourceRef = useRef(null);
   const totalByTsRef = useRef(new Map());
@@ -112,6 +165,7 @@ export default function App({ serverDefaults }) {
     setTotalSeriesNoFee([]);
     setSymbolSeries({});
     setSymbolSeriesNoFee({});
+    setDrawdownMarkers([]);
   }
 
   function clearRunData() {
@@ -184,12 +238,13 @@ export default function App({ serverDefaults }) {
 
     symbolByTsRef.current = new Map();
     const marketCurves = report.market_curves || {};
+    setDrawdownMarkers(buildDrawdownMarkers(marketCurves));
     Object.entries(marketCurves).forEach(([marketSlug, points]) => {
-      const symbol = extractSymbol(marketSlug);
-      if (!symbolByTsRef.current.has(symbol)) {
-        symbolByTsRef.current.set(symbol, new Map());
+      const marketPrefix = extractMarketPrefix(marketSlug);
+      if (!symbolByTsRef.current.has(marketPrefix)) {
+        symbolByTsRef.current.set(marketPrefix, new Map());
       }
-      const symbolMap = symbolByTsRef.current.get(symbol);
+      const symbolMap = symbolByTsRef.current.get(marketPrefix);
       const reduced = reduceCurveDelta(points);
       reduced.forEach((delta, ts) => {
         symbolMap.set(ts, (symbolMap.get(ts) || 0) + delta);
@@ -212,11 +267,11 @@ export default function App({ serverDefaults }) {
     symbolByTsNoFeeRef.current = new Map();
     const marketNoFeeCurves = report.market_curves_no_fee || {};
     Object.entries(marketNoFeeCurves).forEach(([marketSlug, points]) => {
-      const symbol = extractSymbol(marketSlug);
-      if (!symbolByTsNoFeeRef.current.has(symbol)) {
-        symbolByTsNoFeeRef.current.set(symbol, new Map());
+      const marketPrefix = extractMarketPrefix(marketSlug);
+      if (!symbolByTsNoFeeRef.current.has(marketPrefix)) {
+        symbolByTsNoFeeRef.current.set(marketPrefix, new Map());
       }
-      const byTs = symbolByTsNoFeeRef.current.get(symbol);
+      const byTs = symbolByTsNoFeeRef.current.get(marketPrefix);
       const reduced = reduceCurveDelta(points);
       reduced.forEach((delta, ts) => {
         byTs.set(ts, (byTs.get(ts) || 0) + delta);
@@ -335,7 +390,7 @@ export default function App({ serverDefaults }) {
 
     stream.addEventListener("point_market", (event) => {
       const data = JSON.parse(event.data || "{}");
-      appendSymbolDelta(extractSymbol(data.market_slug), data.timestamp, data.delta_realized_pnl_usdc);
+      appendSymbolDelta(extractMarketPrefix(data.market_slug), data.timestamp, data.delta_realized_pnl_usdc);
     });
 
     stream.addEventListener("point_total_no_fee", (event) => {
@@ -345,7 +400,7 @@ export default function App({ serverDefaults }) {
 
     stream.addEventListener("point_market_no_fee", (event) => {
       const data = JSON.parse(event.data || "{}");
-      appendSymbolDeltaNoFee(extractSymbol(data.market_slug), data.timestamp, data.delta_realized_pnl_usdc);
+      appendSymbolDeltaNoFee(extractMarketPrefix(data.market_slug), data.timestamp, data.delta_realized_pnl_usdc);
     });
 
     stream.addEventListener("completed", async () => {
@@ -485,6 +540,7 @@ export default function App({ serverDefaults }) {
           totalSeriesNoFee={totalSeriesNoFee}
           symbolSeries={symbolSeries}
           symbolSeriesNoFee={symbolSeriesNoFee}
+          drawdownMarkers={drawdownMarkers}
         />
 
         <QuantMetricsPanel totalSeries={totalSeries} totalSeriesNoFee={totalSeriesNoFee} markets={markets} />

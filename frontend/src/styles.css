@@ -205,6 +205,18 @@ body {
   box-shadow: 0 8px 22px rgba(23, 45, 74, 0.05);
 }
 
+.market-section {
+  padding: 0 12px 10px;
+}
+
+.market-chart-wrap {
+  height: 290px;
+  border-radius: 12px;
+  border: 1px solid #d8e1ef;
+  background: linear-gradient(180deg, #f8fbff 0%, #f2f6fc 100%);
+  overflow: hidden;
+}
+
 .quant-card {
   border-radius: 18px;
   border: 1px solid var(--line);
@@ -252,6 +264,10 @@ body {
 
   .metric-chart-wrap {
     height: 270px;
+  }
+
+  .market-chart-wrap {
+    height: 260px;
   }
 }
 

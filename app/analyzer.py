@@ -38,6 +38,7 @@ class _MarketProcessResult:
     deltas: list[PnlDelta]
     deltas_no_fee: list[PnlDelta]
     warnings: list[WarningItem]
+    cache_updated: bool = False
 
 
 class AnalyzerHooks(Protocol):
@@ -128,6 +129,7 @@ class PolymarketProfitAnalyzer:
         total_by_ts_no_fee: dict[int, float] = defaultdict(float)
         market_by_ts_no_fee: dict[str, dict[int, float]] = defaultdict(lambda: defaultdict(float))
         address_market_cache = self._market_result_cache.load(req.address)
+        result_cache_dirty = False
 
         try:
             specs = generate_market_slug_specs(req.symbols, req.intervals, req.start_ts, req.end_ts)
@@ -200,6 +202,8 @@ class PolymarketProfitAnalyzer:
                         for warning in result.warnings:
                             all_warnings.append(warning)
                             await hooks.on_warning(warning)
+                        if result.cache_updated:
+                            result_cache_dirty = True
 
                         for delta in result.deltas:
                             total_by_ts[delta.timestamp] += delta.delta_pnl_usdc
@@ -314,10 +318,11 @@ class PolymarketProfitAnalyzer:
 
             return report
         finally:
-            try:
-                self._market_result_cache.save(req.address, address_market_cache)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("market result cache save failed address={} error={}", req.address, exc)
+            if result_cache_dirty:
+                try:
+                    self._market_result_cache.save(req.address, address_market_cache)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("market result cache save failed address={} error={}", req.address, exc)
             await client.aclose()
 
     async def _fetch_markets_with_status(
@@ -416,7 +421,10 @@ class PolymarketProfitAnalyzer:
             warnings=warnings,
         )
         if use_result_cache:
-            address_market_cache[market.slug] = _result_to_cache_payload(result)
+            new_payload = _result_to_cache_payload(result)
+            if address_market_cache.get(market.slug) != new_payload:
+                address_market_cache[market.slug] = new_payload
+                result.cache_updated = True
         return result
 
     def save_json(self, report: AnalysisReport, path: str | None = None) -> str:

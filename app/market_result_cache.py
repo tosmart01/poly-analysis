@@ -35,7 +35,10 @@ class AddressMarketResultCache:
 
         tmp_path = path.with_suffix(".tmp")
         try:
-            tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp_path.write_text(
+                json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                encoding="utf-8",
+            )
             tmp_path.replace(path)
         except Exception:  # noqa: BLE001
             try:

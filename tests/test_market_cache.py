@@ -56,3 +56,26 @@ def test_market_cache_grouped_by_symbol_file(tmp_path):
     assert files[0].name == "btc.json"
     assert cache.get(market_a.slug) is not None
     assert cache.get(market_b.slug) is not None
+
+
+def test_market_cache_get_uses_in_memory_symbol_payload(tmp_path):
+    cache = MarketMetadataCache(cache_dir=tmp_path / "market_cache", recent_window_sec=1800)
+    market = PolymarketMarket(
+        slug="btc-updown-15m-3000",
+        condition_id="cond",
+        up_token_id="up",
+        down_token_id="down",
+        outcomes=["Up", "Down"],
+        outcome_prices=[1.0, 0.0],
+    )
+    cache.set(market.slug, market)
+
+    loaded_first = cache.get(market.slug)
+    assert loaded_first is not None
+
+    cache_file = tmp_path / "market_cache" / "btc.json"
+    cache_file.unlink()
+
+    loaded_second = cache.get(market.slug)
+    assert loaded_second is not None
+    assert loaded_second.slug == market.slug
