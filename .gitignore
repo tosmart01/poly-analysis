@@ -22,6 +22,5 @@ node_modules/
 .idea/
 .jbeval/
 .pytest_cache/
-.python-version
 .DS_Store
 *.log

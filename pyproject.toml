@@ -3,7 +3,7 @@ name = "analysis-poly"
 version = "0.1.0"
 description = "Polymarket real-profit web analyzer"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115.0",
     "httpx>=0.28.1",

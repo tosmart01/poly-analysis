@@ -15,6 +15,11 @@ Polymarket real-profit analyzer with a web UI.
 - It is **not** intended as a universal PnL engine for all Polymarket market types.
 - Main purpose: quantify and visualize the impact of trading fees on real profitability (`Net PnL` vs `No-Fee PnL`).
 
+## Requirements
+
+- Python `3.11+` (recommended: `3.11`)
+- `uv` package manager
+
 ## Run
 
 ```bash
