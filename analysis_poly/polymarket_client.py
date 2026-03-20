@@ -65,6 +65,7 @@ class PolymarketApiClient:
             down_token_id=token_ids[1],
             outcomes=outcomes,
             outcome_prices=outcome_prices,
+            closed=bool(data.get("closed", False)),
         )
 
     async def get_trades(

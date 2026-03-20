@@ -151,6 +151,8 @@ class PolymarketMarket(BaseModel):
     down_token_id: str
     outcomes: list[str]
     outcome_prices: list[float]
+    closed: bool = False
+    outcome: str | None = None
 
 
 class TradeRecord(BaseModel):

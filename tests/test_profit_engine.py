@@ -171,3 +171,119 @@ def test_maker_reward_skipped_for_today_market_and_kept_for_history():
     assert today_report.maker_reward_usdc == 0
     assert any(w.code == "MAKER_REWARD_DEFERRED_TODAY" for w in today_warnings)
     assert hist_report.maker_reward_usdc > 0
+
+
+def test_closed_market_without_redeem_settles_remaining_position_by_outcome_prices():
+    market = PolymarketMarket(
+        slug="btc-updown-5m-3000",
+        condition_id="cond3",
+        up_token_id="up_token",
+        down_token_id="down_token",
+        outcomes=["Up", "Down"],
+        outcome_prices=[1, 0],
+        closed=True,
+    )
+
+    taker_buy = TradeRecord.model_validate(
+        {
+            "transactionHash": "0x11",
+            "timestamp": 2990,
+            "side": "BUY",
+            "asset": "up_token",
+            "conditionId": "cond3",
+            "size": 10,
+            "price": 0.4,
+        }
+    )
+
+    engine = ProfitEngine(fee_rate_bps=1000, maker_reward_ratio=0.2, missing_cost_warn_qty=0.5)
+    report, _, warnings = engine.process_market(
+        market=market,
+        taker_trades=[taker_buy],
+        all_trades=[taker_buy],
+        split_activities=[],
+        redeem_activities=[],
+    )
+
+    up = next(t for t in report.tokens if t.token_id == "up_token")
+    assert up.ending_position_qty == 0
+    assert report.ending_position_up == 0
+    assert report.realized_pnl_usdc > 0
+    assert up.realized_pnl_usdc > 0
+    assert not any(w.code == "CLOSED_MARKET_UNKNOWN_OUTCOME" for w in warnings)
+
+
+def test_closed_market_without_redeem_losing_position_counts_as_loss():
+    market = PolymarketMarket(
+        slug="btc-updown-5m-3500",
+        condition_id="cond35",
+        up_token_id="up_token",
+        down_token_id="down_token",
+        outcomes=["Up", "Down"],
+        outcome_prices=[0, 1],
+        closed=True,
+    )
+
+    taker_buy = TradeRecord.model_validate(
+        {
+            "transactionHash": "0x115",
+            "timestamp": 3490,
+            "side": "BUY",
+            "asset": "up_token",
+            "conditionId": "cond35",
+            "size": 10,
+            "price": 0.4,
+        }
+    )
+
+    engine = ProfitEngine(fee_rate_bps=1000, maker_reward_ratio=0.2, missing_cost_warn_qty=0.5)
+    report, _, warnings = engine.process_market(
+        market=market,
+        taker_trades=[taker_buy],
+        all_trades=[taker_buy],
+        split_activities=[],
+        redeem_activities=[],
+    )
+
+    up = next(t for t in report.tokens if t.token_id == "up_token")
+    assert up.ending_position_qty == 0
+    assert up.realized_pnl_usdc < 0
+    assert report.realized_pnl_usdc < 0
+    assert not any(w.code == "CLOSED_MARKET_UNKNOWN_OUTCOME" for w in warnings)
+
+
+def test_closed_market_without_resolved_outcome_prices_warns_and_keeps_position():
+    market = PolymarketMarket(
+        slug="btc-updown-5m-4000",
+        condition_id="cond4",
+        up_token_id="up_token",
+        down_token_id="down_token",
+        outcomes=["Up", "Down"],
+        outcome_prices=[0.5, 0.5],
+        closed=True,
+    )
+
+    taker_buy = TradeRecord.model_validate(
+        {
+            "transactionHash": "0x12",
+            "timestamp": 3990,
+            "side": "BUY",
+            "asset": "up_token",
+            "conditionId": "cond4",
+            "size": 5,
+            "price": 0.4,
+        }
+    )
+
+    engine = ProfitEngine(fee_rate_bps=1000, maker_reward_ratio=0.2, missing_cost_warn_qty=0.5)
+    report, _, warnings = engine.process_market(
+        market=market,
+        taker_trades=[taker_buy],
+        all_trades=[taker_buy],
+        split_activities=[],
+        redeem_activities=[],
+    )
+
+    up = next(t for t in report.tokens if t.token_id == "up_token")
+    assert up.ending_position_qty > 0
+    assert any(w.code == "CLOSED_MARKET_UNKNOWN_OUTCOME" for w in warnings)

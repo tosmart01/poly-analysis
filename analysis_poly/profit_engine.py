@@ -184,6 +184,14 @@ class ProfitEngine:
                 pnl_deltas.extend(delta)
                 warnings.extend(new_warnings)
 
+        settlement_deltas, settlement_warnings = self._settle_closed_market_positions(
+            market=market,
+            token_states=token_states,
+            events=events,
+        )
+        pnl_deltas.extend(settlement_deltas)
+        warnings.extend(settlement_warnings)
+
         if not maker_reward_enabled and has_maker_trade:
             warnings.append(
                 WarningItem(
@@ -281,6 +289,49 @@ class ProfitEngine:
                     delta_pnl_usdc=maker_reward,
                 )
             )
+
+        return deltas, warnings
+
+    def _settle_closed_market_positions(
+        self,
+        market: PolymarketMarket,
+        token_states: dict[str, _TokenState],
+        events: list[_Event],
+    ) -> tuple[list[PnlDelta], list[WarningItem]]:
+        if not market.closed:
+            return [], []
+
+        unsettled_states = [state for state in token_states.values() if state.position_qty > 1e-12]
+        if not unsettled_states:
+            return [], []
+
+        winner_token = _resolve_winner_token(market)
+        if not winner_token:
+            return [], [
+                WarningItem(
+                    timestamp=_settlement_timestamp(market, events),
+                    market_slug=market.slug,
+                    code="CLOSED_MARKET_UNKNOWN_OUTCOME",
+                    message="market is closed but winner outcome cannot be uniquely inferred",
+                )
+            ]
+
+        settlement_ts = _settlement_timestamp(market, events)
+        deltas: list[PnlDelta] = []
+        warnings: list[WarningItem] = []
+        for token_state in unsettled_states:
+            quantity = token_state.position_qty
+            proceeds = quantity if token_state.token_id == winner_token else 0.0
+            close_deltas, close_warnings = self._close_position(
+                market_slug=market.slug,
+                token_state=token_state,
+                timestamp=settlement_ts,
+                quantity=quantity,
+                proceeds=proceeds,
+                missing_cost_warn_code="CLOSED_MARKET_SETTLEMENT_ZERO_COST",
+            )
+            deltas.extend(close_deltas)
+            warnings.extend(close_warnings)
 
         return deltas, warnings
 
@@ -400,6 +451,12 @@ def _is_maker_reward_enabled_for_market(market_slug: str) -> bool:
     if market_ts is None:
         return True
     return market_ts < _utc_day_start_ts()
+
+
+def _settlement_timestamp(market: PolymarketMarket, events: list[_Event]) -> int:
+    event_ts = max((event.timestamp for event in events), default=0)
+    market_ts = _market_ts_from_slug(market.slug) or 0
+    return max(event_ts, market_ts)
 
 
 

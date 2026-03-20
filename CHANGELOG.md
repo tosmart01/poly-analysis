@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-03-20
+
+### Fixes
+- Settle closed-market residual positions by resolved `outcomePrices` when no explicit `redeem` or manual close is detected.
+- Count closed-market winners as realized profit and losers as realized loss even when the activity feed has no `redeem` record.
+- Persist the market `closed` flag from Polymarket market metadata for settlement decisions.
+
+### Tests
+- Add regression coverage for closed-market settlement with winning, losing, and unresolved `outcomePrices` branches.
+
 ## 2026-03-02
 
 ### Performance
