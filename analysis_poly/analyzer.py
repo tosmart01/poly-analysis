@@ -147,6 +147,8 @@ class PolymarketProfitAnalyzer:
             )
             discovered_markets = _filter_discovered_markets(
                 discovered_markets,
+                start_ts=req.start_ts,
+                end_ts=req.end_ts,
                 keywords=req.keywords,
             )
             total_markets = len(discovered_markets)
@@ -783,9 +785,23 @@ def _is_market_result_cache_eligible(slug: str, now_ts: int, recent_window_sec: 
 
 def _filter_discovered_markets(
     discovered_markets: list[DiscoveredMarket],
+    start_ts: int,
+    end_ts: int,
     keywords: list[str],
 ) -> list[DiscoveredMarket]:
-    return [item for item in discovered_markets if _slug_matches_filters(item.slug, keywords=keywords)]
+    return [
+        item
+        for item in discovered_markets
+        if _slug_in_time_range(item.slug, start_ts=start_ts, end_ts=end_ts)
+        and _slug_matches_filters(item.slug, keywords=keywords)
+    ]
+
+
+def _slug_in_time_range(slug: str, start_ts: int, end_ts: int) -> bool:
+    market_ts = _market_ts(slug)
+    if market_ts is None:
+        return True
+    return start_ts <= market_ts <= end_ts
 
 
 def _slug_matches_filters(slug: str, keywords: list[str]) -> bool:

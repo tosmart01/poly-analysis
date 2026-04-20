@@ -150,6 +150,9 @@ def summarize_discovered_markets(records: list, warnings: list[WarningItem]) -> 
     warned_missing_slug: set[str] = set()
 
     for record in records:
+        if _is_zero_value_redeem(record):
+            continue
+
         slug = str(record.slug or "").strip()
         condition_id = str(record.condition_id or "").strip()
         if not slug:
@@ -185,6 +188,14 @@ def summarize_discovered_markets(records: list, warnings: list[WarningItem]) -> 
         market_by_key.values(),
         key=lambda item: (item.first_activity_ts, item.last_activity_ts, item.slug),
     )
+
+
+def _is_zero_value_redeem(record) -> bool:
+    if str(getattr(record, "type", "")).upper() != "REDEEM":
+        return False
+    size = float(getattr(record, "size", 0) or 0)
+    usdc_size = float(getattr(record, "usdc_size", 0) or 0)
+    return size <= 0 and usdc_size <= 0
 
 
 def dedupe_activity_records(records: list) -> list:

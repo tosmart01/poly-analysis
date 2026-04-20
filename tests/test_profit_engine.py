@@ -438,6 +438,52 @@ def test_closed_market_without_redeem_losing_position_counts_as_loss():
     assert not any(w.code == "CLOSED_MARKET_UNKNOWN_OUTCOME" for w in warnings)
 
 
+def test_zero_value_redeem_does_not_shift_closed_market_settlement_timestamp():
+    market = PolymarketMarket(
+        slug="btc-updown-15m-1767960900",
+        condition_id="cond_zero_redeem",
+        up_token_id="up_token",
+        down_token_id="down_token",
+        outcomes=["Up", "Down"],
+        outcome_prices=[0, 1],
+        closed=True,
+    )
+
+    taker_buy = TradeRecord.model_validate(
+        {
+            "transactionHash": "0xbuy",
+            "timestamp": 1767960918,
+            "side": "BUY",
+            "asset": "up_token",
+            "conditionId": "cond_zero_redeem",
+            "size": 10,
+            "price": 0.52,
+        }
+    )
+    zero_redeem = ActivityRecord.model_validate(
+        {
+            "transactionHash": "0xzero",
+            "timestamp": 1776432712,
+            "type": "REDEEM",
+            "conditionId": "cond_zero_redeem",
+            "size": 0,
+            "usdcSize": 0,
+        }
+    )
+
+    engine = ProfitEngine(fee_rate_bps=1000, missing_cost_warn_qty=0.5)
+    report, deltas, _ = engine.process_market(
+        market=market,
+        taker_trades=[taker_buy],
+        all_trades=[taker_buy],
+        split_activities=[],
+        redeem_activities=[zero_redeem],
+    )
+
+    assert report.realized_pnl_usdc == -5.2
+    assert [delta.timestamp for delta in deltas] == [1767960918]
+
+
 def test_closed_market_without_resolved_outcome_prices_warns_and_keeps_position():
     market = PolymarketMarket(
         slug="btc-updown-5m-4000",

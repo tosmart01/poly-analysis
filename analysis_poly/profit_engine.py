@@ -128,6 +128,11 @@ class ProfitEngine:
             )
 
         for redeem in redeem_activities:
+            redeem_size = float(redeem.size)
+            redeem_usdc_size = float(redeem.usdc_size)
+            if redeem_size <= 0 and redeem_usdc_size <= 0:
+                continue
+
             winner_token = _resolve_winner_token(market)
             if not winner_token:
                 warnings.append(
@@ -146,8 +151,8 @@ class ProfitEngine:
                     tx=redeem.transaction_hash,
                     kind="REDEEM",
                     token_id=winner_token,
-                    size=float(redeem.size),
-                    usdc_size=float(redeem.usdc_size),
+                    size=redeem_size,
+                    usdc_size=redeem_usdc_size,
                 )
             )
 
