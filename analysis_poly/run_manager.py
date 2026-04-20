@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -13,13 +14,20 @@ from .analyzer import AnalyzerHooks, PolymarketProfitAnalyzer
 from .models import (
     AnalysisReport,
     AnalysisRequest,
+    CurvePoint,
+    MarketReport,
     RunCreated,
     RunState,
     RunStatus,
     RunStopAck,
+    TokenReport,
     WarningItem,
     utc_now,
 )
+
+RESULT_MAX_CURVE_POINTS = 2000
+RESULT_MAX_DRAWDOWN_MARKERS = 8
+RESULT_MIN_DRAWDOWN_DELTA_USDC = 0.5
 
 
 @dataclass
@@ -148,13 +156,12 @@ class RunManager:
 
             ctx.task = asyncio.create_task(self._execute_run(run_id, req))
             logger.info(
-                "create run run_id={} address={} range=[{}, {}] symbols={} intervals={}",
+                "create run run_id={} address={} range=[{}, {}] keywords={}",
                 run_id,
                 req.address,
                 req.start_ts,
                 req.end_ts,
-                ",".join(req.symbols),
-                ",".join(str(v) for v in req.intervals),
+                ",".join(req.keywords),
             )
             return RunCreated(run_id=run_id, status=state.status)
 
@@ -172,14 +179,14 @@ class RunManager:
         await self._emit(run_id, "progress", {"message": "stopping requested"})
         return RunStopAck(run_id=run_id, status=ctx.state.status)
 
-    async def get_result(self, run_id: str) -> AnalysisReport:
+    async def get_result(self, run_id: str) -> dict:
         ctx = self._runs.get(run_id)
         if not ctx:
             raise HTTPException(status_code=404, detail="run not found")
 
         if not ctx.result:
             raise HTTPException(status_code=202, detail="run not finished")
-        return ctx.result
+        return _compact_analysis_report(ctx.result, self._to_public_artifact_paths(ctx.result.artifacts))
 
     async def get_state(self, run_id: str) -> RunState:
         ctx = self._runs.get(run_id)
@@ -287,3 +294,131 @@ class RunManager:
             filename = Path(path).name
             public[key] = f"/reports/{filename}"
         return public
+
+
+def _compact_analysis_report(report: AnalysisReport, public_artifacts: dict[str, str]) -> dict:
+    symbol_curves = _aggregate_symbol_curves(report.market_curves)
+    symbol_curves_no_fee = _aggregate_symbol_curves(report.market_curves_no_fee)
+    return {
+        "summary": report.summary.model_dump(),
+        "markets": [_compact_market_report(market) for market in report.markets],
+        "maker_rebates": [item.model_dump() for item in report.maker_rebates],
+        "total_series": _curve_points_to_series(report.total_curve),
+        "symbol_series": {key: _curve_points_to_series(points) for key, points in symbol_curves.items()},
+        "total_series_no_fee": _curve_points_to_series(report.total_curve_no_fee),
+        "symbol_series_no_fee": {
+            key: _curve_points_to_series(points) for key, points in symbol_curves_no_fee.items()
+        },
+        "drawdown_markers": _build_drawdown_markers(report.market_curves),
+        "warnings": [warning.model_dump() for warning in report.warnings[-200:]],
+        "artifacts": public_artifacts,
+        "is_partial": report.is_partial,
+    }
+
+
+def _compact_market_report(market: MarketReport) -> dict:
+    return {
+        "market_slug": market.market_slug,
+        "realized_pnl_usdc": market.realized_pnl_usdc,
+        "taker_fee_usdc": market.taker_fee_usdc,
+        "maker_reward_usdc": market.maker_reward_usdc,
+        "ending_position_up": market.ending_position_up,
+        "ending_position_down": market.ending_position_down,
+        "tokens": [_compact_token_report(token) for token in market.tokens],
+    }
+
+
+def _compact_token_report(token: TokenReport) -> dict:
+    return {
+        "token_id": token.token_id,
+        "outcome": token.outcome,
+        "entry_amount_usdc": token.entry_amount_usdc,
+        "avg_entry_price": token.avg_entry_price,
+        "realized_pnl_usdc": token.realized_pnl_usdc,
+        "buy_qty": token.buy_qty,
+        "sell_qty": token.sell_qty,
+        "redeem_qty": token.redeem_qty,
+        "ending_position_qty": token.ending_position_qty,
+        "trade_count": token.trade_count,
+    }
+
+
+def _curve_points_to_series(points: list[CurvePoint]) -> list[dict]:
+    sampled = _downsample_curve_points(points, RESULT_MAX_CURVE_POINTS)
+    return [
+        {
+            "ts": point.timestamp,
+            "value": point.cumulative_realized_pnl_usdc,
+        }
+        for point in sampled
+    ]
+
+
+def _downsample_curve_points(points: list[CurvePoint], max_points: int) -> list[CurvePoint]:
+    if len(points) <= max_points:
+        return points
+    step = max(1, len(points) // max_points)
+    sampled = [points[idx] for idx in range(0, len(points), step)]
+    if sampled[-1] is not points[-1]:
+        sampled.append(points[-1])
+    return sampled
+
+
+def _aggregate_symbol_curves(market_curves: dict[str, list[CurvePoint]]) -> dict[str, list[CurvePoint]]:
+    symbol_by_ts: dict[str, dict[int, float]] = defaultdict(lambda: defaultdict(float))
+    for market_slug, points in market_curves.items():
+        market_prefix = _extract_market_prefix(market_slug)
+        for point in points:
+            symbol_by_ts[market_prefix][point.timestamp] += point.delta_realized_pnl_usdc
+
+    symbol_curves: dict[str, list[CurvePoint]] = {}
+    for market_prefix, by_ts in symbol_by_ts.items():
+        cumulative = 0.0
+        symbol_curves[market_prefix] = []
+        for ts in sorted(by_ts.keys()):
+            delta = by_ts[ts]
+            cumulative += delta
+            symbol_curves[market_prefix].append(
+                CurvePoint(
+                    timestamp=ts,
+                    delta_realized_pnl_usdc=round(delta, 10),
+                    cumulative_realized_pnl_usdc=round(cumulative, 10),
+                )
+            )
+    return symbol_curves
+
+
+def _build_drawdown_markers(market_curves: dict[str, list[CurvePoint]]) -> list[dict]:
+    markers: list[dict] = []
+    for market_slug, points in market_curves.items():
+        worst_point: CurvePoint | None = None
+        for point in points:
+            if point.delta_realized_pnl_usdc >= -RESULT_MIN_DRAWDOWN_DELTA_USDC:
+                continue
+            if worst_point is None or point.delta_realized_pnl_usdc < worst_point.delta_realized_pnl_usdc:
+                worst_point = point
+        if worst_point is None:
+            continue
+        markers.append(
+            {
+                "ts": worst_point.timestamp,
+                "delta": worst_point.delta_realized_pnl_usdc,
+                "marketSlug": market_slug,
+                "marketPrefix": _extract_market_prefix(market_slug),
+            }
+        )
+    markers.sort(key=lambda item: item["delta"])
+    return markers[:RESULT_MAX_DRAWDOWN_MARKERS]
+
+
+def _extract_market_prefix(market_slug: str) -> str:
+    raw = str(market_slug or "").strip().lower()
+    if not raw:
+        return "unknown"
+    parts = [part for part in raw.split("-") if part]
+    if len(parts) >= 3:
+        interval = parts[2][:-1] if parts[2].endswith("m") else parts[2]
+        if parts[1] == "updown":
+            return f"{parts[0]}-{interval}"
+        return f"{parts[0]}-{parts[1]}-{interval}"
+    return parts[0] if parts else "unknown"

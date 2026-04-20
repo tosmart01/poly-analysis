@@ -21,6 +21,7 @@ const rootNode = document.getElementById("root");
 if (!rootNode) {
   throw new Error("missing #root container");
 }
+const serverDefaults = readServerDefaults();
 
 createRoot(rootNode).render(
   <React.StrictMode>
@@ -33,7 +34,7 @@ createRoot(rootNode).render(
         },
       }}
     >
-      <App serverDefaults={readServerDefaults()} />
+      <App serverDefaults={serverDefaults} />
     </ConfigProvider>
   </React.StrictMode>,
 );

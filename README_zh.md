@@ -9,7 +9,8 @@ Polymarket 真实利润分析 Web 工具。
 
 ## 适用范围（重要）
 
-- 本工具主要针对 Polymarket crypto `updown` 且含 taker 手续费的市场，重点是 `5m` 和 `15m`。
+- 本工具主要针对 Polymarket crypto `updown` 且含 taker 手续费的市场。
+- 主面板会先按所选时间范围查询用户 activity，再只回放命中的 slug。
 - **不**是一个覆盖所有 Polymarket 市场类型的通用 PnL 引擎。
 - 主要目的：量化并可视化手续费对真实盈利的影响（`Net PnL` 对比 `No-Fee PnL`）。
 
@@ -30,7 +31,7 @@ pip install .
 
 ```bash
 analysis-poly
-analysis-poly-open --address 0xabc --symbols btc,eth --intervals 5,15
+analysis-poly-open --address 0xabc --keywords updown,15m
 ```
 
 ## 启动
@@ -49,8 +50,7 @@ uv run python main.py
 ```bash
 uv run -m analysis_poly.open_with_params \
   --address 0xabc \
-  --symbols btc,eth \
-  --intervals 5,15 \
+  --keywords updown,15m \
   --start-time "2026-03-01 00:00" \
   --end-time "2026-03-02 00:00" \
   --concurrency 8

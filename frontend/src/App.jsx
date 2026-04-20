@@ -2,6 +2,7 @@ import { Layout, message } from "antd";
 import { useEffect, useMemo, useRef, useState } from "react";
 import AdvancedModal from "./components/AdvancedModal";
 import ConfigPanel from "./components/ConfigPanel";
+import MakerRebateTable from "./components/MakerRebateTable";
 import MarketTable from "./components/MarketTable";
 import PnlCharts from "./components/PnlCharts";
 import QuantMetricsPanel from "./components/QuantMetricsPanel";
@@ -13,6 +14,8 @@ import { parseDateTimeTextToUnixSeconds, toDateTimeText } from "./utils/dateTime
 const IDLE_WARNING = "No warnings. Strategy is running with live market aggregation.";
 const MAX_DRAWDOWN_MARKERS = 8;
 const MIN_DRAWDOWN_DELTA_USDC = 0.5;
+const LIVE_CURVE_BUCKET_SEC = 15 * 60;
+const MAX_LIVE_CURVE_POINT_EVENTS = 12000;
 
 function extractMarketPrefix(marketSlug) {
   const raw = String(marketSlug || "").trim().toLowerCase();
@@ -96,13 +99,11 @@ function parseBootstrapFromQuery(searchText) {
 
   const fieldMap = {
     address: "address",
-    symbols: "symbols",
-    intervals: "intervals",
+    keywords: "keywords",
     start_time: "startTime",
     end_time: "endTime",
     fee_rate_bps: "feeRateBps",
     missing_cost_warn_qty: "missingCostWarnQty",
-    maker_reward_ratio: "makerRewardRatio",
     concurrency: "concurrency",
     page_limit: "pageLimit",
   };
@@ -113,6 +114,18 @@ function parseBootstrapFromQuery(searchText) {
       patch[formKey] = value;
     }
   });
+
+  if (!patch.keywords) {
+    const legacyIntervals = params.get("intervals");
+    if (legacyIntervals !== null && String(legacyIntervals).trim() !== "") {
+      patch.keywords = legacyIntervals
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .map((item) => (item.endsWith("m") ? item : `${item}m`))
+        .join(",");
+    }
+  }
 
   if (!patch.startTime) {
     const startTs = Number(params.get("start_ts"));
@@ -132,6 +145,14 @@ function parseBootstrapFromQuery(searchText) {
   return { patch, autoStart };
 }
 
+function bucketLiveCurveTs(timestamp) {
+  const ts = Number(timestamp || 0);
+  if (!Number.isFinite(ts) || ts <= 0) {
+    return 0;
+  }
+  return Math.floor(ts / LIVE_CURVE_BUCKET_SEC) * LIVE_CURVE_BUCKET_SEC;
+}
+
 export default function App({ serverDefaults }) {
   const [formData, setFormData] = useState(() => buildDefaultForm(serverDefaults));
   const [runId, setRunId] = useState(null);
@@ -142,6 +163,7 @@ export default function App({ serverDefaults }) {
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [summary, setSummary] = useState(EMPTY_SUMMARY);
   const [markets, setMarkets] = useState([]);
+  const [makerRebates, setMakerRebates] = useState([]);
   const [downloads, setDownloads] = useState(null);
   const [warnings, setWarnings] = useState([]);
 
@@ -157,11 +179,14 @@ export default function App({ serverDefaults }) {
   const symbolByTsRef = useRef(new Map());
   const totalByTsNoFeeRef = useRef(new Map());
   const symbolByTsNoFeeRef = useRef(new Map());
+  const liveCurvePointCountRef = useRef(0);
+  const liveCurvesPausedRef = useRef(false);
 
   useEffect(() => {
     const end = new Date();
     end.setSeconds(0, 0);
-    const start = new Date(end.getTime() - 3 * 24 * 60 * 60 * 1000);
+    const start = new Date(end);
+    start.setHours(0, 0, 0, 0);
     setFormData((prev) => ({
       ...prev,
       startTime: prev.startTime || toDateTimeText(start),
@@ -233,6 +258,8 @@ export default function App({ serverDefaults }) {
     symbolByTsRef.current = new Map();
     totalByTsNoFeeRef.current = new Map();
     symbolByTsNoFeeRef.current = new Map();
+    liveCurvePointCountRef.current = 0;
+    liveCurvesPausedRef.current = false;
     setTotalSeries([]);
     setTotalSeriesNoFee([]);
     setSymbolSeries({});
@@ -240,11 +267,30 @@ export default function App({ serverDefaults }) {
     setDrawdownMarkers([]);
   }
 
+  function shouldSkipLiveCurveUpdate() {
+    if (liveCurvesPausedRef.current) {
+      return true;
+    }
+    liveCurvePointCountRef.current += 1;
+    if (liveCurvePointCountRef.current <= MAX_LIVE_CURVE_POINT_EVENTS) {
+      return false;
+    }
+
+    liveCurvesPausedRef.current = true;
+    totalByTsRef.current = new Map();
+    symbolByTsRef.current = new Map();
+    totalByTsNoFeeRef.current = new Map();
+    symbolByTsNoFeeRef.current = new Map();
+    pushWarning("INFO: live curve updates paused for high-frequency runs; compact aggregated curves will load when the run completes");
+    return true;
+  }
+
   function clearRunData() {
     clearCurves();
     setProgress({ current: 0, total: 0 });
     setSummary(EMPTY_SUMMARY);
     setMarkets([]);
+    setMakerRebates([]);
     setDownloads(null);
     setWarnings([]);
   }
@@ -289,14 +335,14 @@ export default function App({ serverDefaults }) {
   }
 
   function appendTotalDelta(timestamp, delta) {
-    const ts = Number(timestamp);
+    const ts = bucketLiveCurveTs(timestamp);
     const byTs = totalByTsRef.current;
     byTs.set(ts, (byTs.get(ts) || 0) + Number(delta || 0));
     recomputeTotalSeries();
   }
 
   function appendSymbolDelta(symbol, timestamp, delta) {
-    const ts = Number(timestamp);
+    const ts = bucketLiveCurveTs(timestamp);
     if (!symbolByTsRef.current.has(symbol)) {
       symbolByTsRef.current.set(symbol, new Map());
     }
@@ -390,14 +436,14 @@ export default function App({ serverDefaults }) {
   }
 
   function appendTotalDeltaNoFee(timestamp, delta) {
-    const ts = Number(timestamp);
+    const ts = bucketLiveCurveTs(timestamp);
     const byTs = totalByTsNoFeeRef.current;
     byTs.set(ts, (byTs.get(ts) || 0) + Number(delta || 0));
     recomputeTotalSeriesNoFee();
   }
 
   function appendSymbolDeltaNoFee(symbol, timestamp, delta) {
-    const ts = Number(timestamp);
+    const ts = bucketLiveCurveTs(timestamp);
     if (!symbolByTsNoFeeRef.current.has(symbol)) {
       symbolByTsNoFeeRef.current.set(symbol, new Map());
     }
@@ -413,6 +459,7 @@ export default function App({ serverDefaults }) {
     }
 
     setMarkets((report.markets || []).filter(hasTradeActivity));
+    setMakerRebates(report.maker_rebates || []);
     setSummary(report.summary || EMPTY_SUMMARY);
     setDownloads(report.artifacts || null);
     if (Array.isArray(report.warnings)) {
@@ -420,6 +467,18 @@ export default function App({ serverDefaults }) {
         .map((warning) => `${warning.code}: ${warning.message}`)
         .reverse();
       setWarnings((prev) => [...warningTexts, ...prev].slice(0, 200));
+    }
+    if (Array.isArray(report.total_series)) {
+      totalByTsRef.current = new Map();
+      symbolByTsRef.current = new Map();
+      totalByTsNoFeeRef.current = new Map();
+      symbolByTsNoFeeRef.current = new Map();
+      setTotalSeries(report.total_series || []);
+      setTotalSeriesNoFee(report.total_series_no_fee || []);
+      setSymbolSeries(report.symbol_series || {});
+      setSymbolSeriesNoFee(report.symbol_series_no_fee || {});
+      setDrawdownMarkers(report.drawdown_markers || []);
+      return;
     }
 
     rebuildCurvesFromReport(report);
@@ -456,21 +515,33 @@ export default function App({ serverDefaults }) {
     });
 
     stream.addEventListener("point_total", (event) => {
+      if (shouldSkipLiveCurveUpdate()) {
+        return;
+      }
       const data = JSON.parse(event.data || "{}");
       appendTotalDelta(data.timestamp, data.delta_realized_pnl_usdc);
     });
 
     stream.addEventListener("point_market", (event) => {
+      if (shouldSkipLiveCurveUpdate()) {
+        return;
+      }
       const data = JSON.parse(event.data || "{}");
       appendSymbolDelta(extractMarketPrefix(data.market_slug), data.timestamp, data.delta_realized_pnl_usdc);
     });
 
     stream.addEventListener("point_total_no_fee", (event) => {
+      if (shouldSkipLiveCurveUpdate()) {
+        return;
+      }
       const data = JSON.parse(event.data || "{}");
       appendTotalDeltaNoFee(data.timestamp, data.delta_realized_pnl_usdc);
     });
 
     stream.addEventListener("point_market_no_fee", (event) => {
+      if (shouldSkipLiveCurveUpdate()) {
+        return;
+      }
       const data = JSON.parse(event.data || "{}");
       appendSymbolDeltaNoFee(extractMarketPrefix(data.market_slug), data.timestamp, data.delta_realized_pnl_usdc);
     });
@@ -521,17 +592,12 @@ export default function App({ serverDefaults }) {
       address: sourceFormData.address.trim(),
       start_ts: startTs,
       end_ts: endTs,
-      symbols: sourceFormData.symbols
+      keywords: sourceFormData.keywords
         .split(",")
         .map((item) => item.trim().toLowerCase())
         .filter(Boolean),
-      intervals: sourceFormData.intervals
-        .split(",")
-        .map((item) => Number(item.trim()))
-        .filter((value) => Number.isFinite(value) && value > 0),
       fee_rate_bps: Number(sourceFormData.feeRateBps),
       missing_cost_warn_qty: Number(sourceFormData.missingCostWarnQty),
-      maker_reward_ratio: Number(sourceFormData.makerRewardRatio),
       concurrency: Number(sourceFormData.concurrency),
       page_limit: Number(sourceFormData.pageLimit),
       request_timeout_sec: 20,
@@ -616,6 +682,8 @@ export default function App({ serverDefaults }) {
         />
 
         <QuantMetricsPanel totalSeries={totalSeries} totalSeriesNoFee={totalSeriesNoFee} markets={markets} />
+
+        <MakerRebateTable makerRebates={makerRebates} />
 
         <MarketTable markets={markets} />
       </div>

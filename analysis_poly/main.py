@@ -12,7 +12,7 @@ else:
     from .web import app
 
 
-def run(host: str = "0.0.0.0", port: int = 8000) -> None:
+def run(host: str = "127.0.0.1", port: int = 8000) -> None:
     import uvicorn
 
     configure_logging()

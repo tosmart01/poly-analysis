@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from typing import Any, Mapping
 
 from .models import (
     ActivityRecord,
@@ -12,6 +12,12 @@ from .models import (
     WarningItem,
 )
 from .models import TradeRecord
+
+
+_HARD_CODED_FEE_START_TS = 1767661200  # 2026-01-06 09:00:00 Asia/Shanghai
+_HARD_CODED_FEE_END_TS = 1774832400  # 2026-03-30 09:00:00 Asia/Shanghai
+_HARD_CODED_FEE_RATE_BPS = 1000.0
+_HARD_CODED_FEE_SLUG_PARTS = ("updown-5m", "updown-15m")
 
 
 @dataclass
@@ -33,6 +39,7 @@ class _TokenState:
     token_id: str
     outcome: str
     lots: deque[_Lot]
+    buy_cost_usdc: float = 0.0
     realized_pnl_usdc: float = 0.0
     taker_fee_usdc: float = 0.0
     maker_reward_usdc: float = 0.0
@@ -45,6 +52,12 @@ class _TokenState:
     @property
     def position_qty(self) -> float:
         return sum(lot.qty for lot in self.lots)
+
+    @property
+    def avg_entry_price(self) -> float | None:
+        if self.buy_qty <= 1e-12:
+            return None
+        return self.buy_cost_usdc / self.buy_qty
 
 
 @dataclass
@@ -64,12 +77,10 @@ class ProfitEngine:
     def __init__(
         self,
         fee_rate_bps: float,
-        maker_reward_ratio: float,
         missing_cost_warn_qty: float,
         charge_taker_fee: bool = True,
     ):
         self._fee_rate_bps = fee_rate_bps
-        self._maker_reward_ratio = maker_reward_ratio
         self._missing_cost_warn_qty = missing_cost_warn_qty
         self._charge_taker_fee = charge_taker_fee
 
@@ -89,13 +100,9 @@ class ProfitEngine:
 
         taker_keys = {_trade_key(t) for t in taker_trades}
         events: list[_Event] = []
-        maker_reward_enabled = _is_maker_reward_enabled_for_market(market.slug)
-        has_maker_trade = False
 
         for trade in all_trades:
             is_taker = _trade_key(trade) in taker_keys
-            if not is_taker:
-                has_maker_trade = True
             events.append(
                 _Event(
                     timestamp=trade.timestamp,
@@ -149,16 +156,16 @@ class ProfitEngine:
         pnl_deltas: list[PnlDelta] = []
         for event in events:
             if event.kind == "TRADE" and event.token_id in token_states:
-                token_state = token_states[event.token_id]
-                token_state.trade_count += 1
-                delta, new_warnings = self._apply_trade(
-                    market_slug=market.slug,
-                    token_state=token_state,
-                    event=event,
-                    maker_reward_enabled=maker_reward_enabled,
-                )
-                pnl_deltas.extend(delta)
-                warnings.extend(new_warnings)
+                    token_state = token_states[event.token_id]
+                    token_state.trade_count += 1
+                    delta, new_warnings = self._apply_trade(
+                        market=market,
+                        market_slug=market.slug,
+                        token_state=token_state,
+                        event=event,
+                    )
+                    pnl_deltas.extend(delta)
+                    warnings.extend(new_warnings)
             elif event.kind == "SPLIT":
                 up_state = token_states[market.up_token_id]
                 down_state = token_states[market.down_token_id]
@@ -192,24 +199,18 @@ class ProfitEngine:
         pnl_deltas.extend(settlement_deltas)
         warnings.extend(settlement_warnings)
 
-        if not maker_reward_enabled and has_maker_trade:
-            warnings.append(
-                WarningItem(
-                    market_slug=market.slug,
-                    code="MAKER_REWARD_DEFERRED_TODAY",
-                    message=(
-                        "maker reward for markets on/after current UTC day 00:00 is excluded "
-                        "because Polymarket settles maker rewards once per day"
-                    ),
-                )
-            )
-
         token_reports: list[TokenReport] = []
         for token_state in token_states.values():
             token_reports.append(
                 TokenReport(
                     token_id=token_state.token_id,
                     outcome=token_state.outcome,
+                    entry_amount_usdc=round(token_state.buy_cost_usdc, 10),
+                    avg_entry_price=(
+                        round(token_state.avg_entry_price, 10)
+                        if token_state.avg_entry_price is not None
+                        else None
+                    ),
                     realized_pnl_usdc=round(token_state.realized_pnl_usdc, 10),
                     taker_fee_usdc=round(token_state.taker_fee_usdc, 10),
                     maker_reward_usdc=round(token_state.maker_reward_usdc, 10),
@@ -239,15 +240,23 @@ class ProfitEngine:
 
     def _apply_trade(
         self,
+        market: PolymarketMarket,
         market_slug: str,
         token_state: _TokenState,
         event: _Event,
-        maker_reward_enabled: bool,
     ) -> tuple[list[PnlDelta], list[WarningItem]]:
         deltas: list[PnlDelta] = []
         warnings: list[WarningItem] = []
 
-        adjusted_size, _, fee_usdc = _fee_adjust(event.size, event.price, self._fee_rate_bps)
+        adjusted_size, _, fee_usdc = _fee_adjust_for_trade(
+            size=event.size,
+            price=event.price,
+            side=event.side,
+            timestamp=event.timestamp,
+            market_slug=market.slug,
+            fee_schedule=_market_fee_schedule(market),
+            fallback_fee_rate_bps=self._fee_rate_bps,
+        )
 
         if event.side == "BUY":
             qty_add = event.size
@@ -257,13 +266,14 @@ class ProfitEngine:
             if qty_add > 0:
                 token_state.lots.append(_Lot(qty=qty_add, cost_per_qty=total_cost / qty_add))
             token_state.buy_qty += qty_add
+            token_state.buy_cost_usdc += total_cost
             if event.is_taker and self._charge_taker_fee:
                 token_state.taker_fee_usdc += fee_usdc
         elif event.side == "SELL":
             token_state.sell_qty += event.size
             proceeds = event.size * event.price
             if event.is_taker and self._charge_taker_fee:
-                proceeds = adjusted_size * event.price
+                proceeds -= fee_usdc
             close_deltas, close_warnings = self._close_position(
                 market_slug=market_slug,
                 token_state=token_state,
@@ -276,19 +286,6 @@ class ProfitEngine:
             warnings.extend(close_warnings)
             if event.is_taker and self._charge_taker_fee:
                 token_state.taker_fee_usdc += fee_usdc
-
-        if not event.is_taker and maker_reward_enabled:
-            maker_reward = fee_usdc * self._maker_reward_ratio
-            token_state.realized_pnl_usdc += maker_reward
-            token_state.maker_reward_usdc += maker_reward
-            deltas.append(
-                PnlDelta(
-                    timestamp=event.timestamp,
-                    market_slug=market_slug,
-                    token_id=token_state.token_id,
-                    delta_pnl_usdc=maker_reward,
-                )
-            )
 
         return deltas, warnings
 
@@ -388,13 +385,85 @@ class ProfitEngine:
 
 
 
-def _fee_adjust(size: float, price: float, fee_rate_bps: float) -> tuple[float, float, float]:
-    fee_multiplier = fee_rate_bps / 1000 if fee_rate_bps else 0.0
-    fee = 0.25 * (price * (1 - price)) ** 2 * fee_multiplier
-    adjusted_size = (1 - fee) * size
+def _fee_adjust_for_trade(
+    size: float,
+    price: float,
+    side: str | None,
+    timestamp: int,
+    market_slug: str,
+    fee_schedule: Mapping[str, Any] | None = None,
+    fallback_fee_rate_bps: float = 0.0,
+) -> tuple[float, float, float]:
+    if timestamp < _HARD_CODED_FEE_START_TS:
+        return size, 0.0, 0.0
+
+    if timestamp < _HARD_CODED_FEE_END_TS:
+        if _has_hard_coded_fee_slug(market_slug):
+            return _legacy_fee_adjust(size, price, _HARD_CODED_FEE_RATE_BPS)
+        return size, 0.0, 0.0
+
+    return _fee_adjust(
+        size=size,
+        price=price,
+        side=side,
+        fee_schedule=fee_schedule,
+        fallback_fee_rate_bps=fallback_fee_rate_bps,
+    )
+
+
+def _fee_adjust(
+    size: float,
+    price: float,
+    side: str | None,
+    fee_schedule: Mapping[str, Any] | None = None,
+    fallback_fee_rate_bps: float = 0.0,
+) -> tuple[float, float, float]:
+    if size <= 0 or price <= 0:
+        return size, 0.0, 0.0
+
+    if fee_schedule is not None:
+        rate = float(fee_schedule.get("rate") or 0.0)
+        if rate <= 0:
+            return size, 0.0, 0.0
+        fee_usdc = round(max(size * rate * price * (1 - price), 0.0), 5)
+        if fee_usdc <= 0:
+            return size, 0.0, 0.0
+
+        side_value = str(getattr(side, "value", side) or "").upper()
+        if side_value == "BUY":
+            fee_token = fee_usdc / price
+            adjusted_size = max(size - fee_token, 0.0)
+            return adjusted_size, fee_token, fee_usdc
+
+        return size, 0.0, fee_usdc
+
+    return _legacy_fee_adjust(size, price, fallback_fee_rate_bps)
+
+
+def _legacy_fee_adjust(size: float, price: float, fee_rate_bps: float) -> tuple[float, float, float]:
+    adjusted_size = _default_fee_calc(size, price, fee_rate_bps)
     fee_token = size - adjusted_size
     fee_usdc = fee_token * price
     return adjusted_size, fee_token, fee_usdc
+
+
+def _default_fee_calc(size: float, price: float, fee_rate_bps: float) -> float:
+    fee_multiplier = fee_rate_bps / 1000 if fee_rate_bps else 0.0
+    fee = 0.25 * (price * (1 - price)) ** 2 * fee_multiplier
+    return (1 - fee) * size
+
+
+def _has_hard_coded_fee_slug(market_slug: str) -> bool:
+    slug = market_slug.lower()
+    return any(part in slug for part in _HARD_CODED_FEE_SLUG_PARTS)
+
+
+def _market_fee_schedule(market: PolymarketMarket) -> Mapping[str, Any] | None:
+    if not market.fees_enabled:
+        return {"rate": 0.0, "rebateRate": 0.0}
+    if market.fee_schedule is None:
+        return None
+    return market.fee_schedule.model_dump()
 
 
 
@@ -438,19 +507,6 @@ def _market_ts_from_slug(market_slug: str) -> int | None:
         return int(str(market_slug).rsplit("-", 1)[-1])
     except Exception:  # noqa: BLE001
         return None
-
-
-def _utc_day_start_ts(now: datetime | None = None) -> int:
-    dt = now or datetime.now(timezone.utc)
-    start = datetime(dt.year, dt.month, dt.day, tzinfo=timezone.utc)
-    return int(start.timestamp())
-
-
-def _is_maker_reward_enabled_for_market(market_slug: str) -> bool:
-    market_ts = _market_ts_from_slug(market_slug)
-    if market_ts is None:
-        return True
-    return market_ts < _utc_day_start_ts()
 
 
 def _settlement_timestamp(market: PolymarketMarket, events: list[_Event]) -> int:

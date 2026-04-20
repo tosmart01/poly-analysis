@@ -36,6 +36,49 @@ function marketPrefix(slug) {
   return parts[0] || "unknown";
 }
 
+function formatTokenQty(value) {
+  return Number(value || 0).toFixed(4);
+}
+
+function formatTokenPrice(value) {
+  if (value == null) {
+    return "-";
+  }
+  return Number(value).toFixed(4);
+}
+
+function entryDirection(record) {
+  const tokens = Array.isArray(record?.tokens) ? record.tokens : [];
+  const sides = tokens
+    .filter((token) => Number(token.buy_qty || 0) > 0 || Number(token.entry_amount_usdc || 0) > 0)
+    .map((token) => String(token.outcome || "").trim())
+    .filter(Boolean);
+
+  const uniqueSides = [...new Set(sides)];
+  if (!uniqueSides.length) {
+    return "-";
+  }
+  if (uniqueSides.length === 1) {
+    return uniqueSides[0];
+  }
+  return "Both";
+}
+
+function entryAmount(record) {
+  const tokens = Array.isArray(record?.tokens) ? record.tokens : [];
+  return tokens.reduce((sum, token) => sum + Number(token.entry_amount_usdc || 0), 0);
+}
+
+function avgEntryPrice(record) {
+  const tokens = Array.isArray(record?.tokens) ? record.tokens : [];
+  const totalBuyQty = tokens.reduce((sum, token) => sum + Number(token.buy_qty || 0), 0);
+  if (totalBuyQty <= 1e-12) {
+    return null;
+  }
+  const totalEntryAmount = entryAmount(record);
+  return totalEntryAmount / totalBuyQty;
+}
+
 function buildHistogram(values, bins = 12) {
   if (!values.length) {
     return { labels: [], counts: [] };
@@ -90,25 +133,25 @@ const columns = [
     sorter: (a, b) => Number(a.taker_fee_usdc || 0) - Number(b.taker_fee_usdc || 0),
   },
   {
-    title: "Maker Reward",
-    dataIndex: "maker_reward_usdc",
-    key: "maker_reward_usdc",
-    render: (value) => formatUsd(value),
-    sorter: (a, b) => Number(a.maker_reward_usdc || 0) - Number(b.maker_reward_usdc || 0),
+    title: "Entry Side",
+    key: "entry_side",
+    width: 120,
+    render: (_value, record) => entryDirection(record),
+    sorter: (a, b) => entryDirection(a).localeCompare(entryDirection(b)),
   },
   {
-    title: "End Pos Up",
-    dataIndex: "ending_position_up",
-    key: "ending_position_up",
-    render: (value) => Number(value || 0).toFixed(4),
-    sorter: (a, b) => Number(a.ending_position_up || 0) - Number(b.ending_position_up || 0),
+    title: "Entry Amt",
+    key: "entry_amount_usdc",
+    width: 130,
+    render: (_value, record) => formatUsd(entryAmount(record)),
+    sorter: (a, b) => entryAmount(a) - entryAmount(b),
   },
   {
-    title: "End Pos Down",
-    dataIndex: "ending_position_down",
-    key: "ending_position_down",
-    render: (value) => Number(value || 0).toFixed(4),
-    sorter: (a, b) => Number(a.ending_position_down || 0) - Number(b.ending_position_down || 0),
+    title: "Avg Entry",
+    key: "avg_entry_price",
+    width: 120,
+    render: (_value, record) => formatTokenPrice(avgEntryPrice(record)),
+    sorter: (a, b) => Number(avgEntryPrice(a) || 0) - Number(avgEntryPrice(b) || 0),
   },
 ];
 
@@ -124,7 +167,6 @@ export default function MarketTable({ markets }) {
           win_count: 0,
           pnl_sum: 0,
           taker_fee_sum: 0,
-          maker_reward_sum: 0,
         });
       }
       const row = agg.get(prefix);
@@ -135,7 +177,6 @@ export default function MarketTable({ markets }) {
       }
       row.pnl_sum += pnl;
       row.taker_fee_sum += Number(market.taker_fee_usdc || 0);
-      row.maker_reward_sum += Number(market.maker_reward_usdc || 0);
     });
 
     return [...agg.values()]
@@ -145,11 +186,74 @@ export default function MarketTable({ markets }) {
           ...row,
           avg_pnl: count > 0 ? row.pnl_sum / count : 0,
           win_rate: count > 0 ? (row.win_count / count) * 100 : 0,
-          fee_net: Number(row.maker_reward_sum || 0) - Number(row.taker_fee_sum || 0),
         };
       })
       .sort((a, b) => Number(b.pnl_sum || 0) - Number(a.pnl_sum || 0));
   }, [markets]);
+
+  const tokenColumns = [
+    {
+      title: "Outcome",
+      dataIndex: "outcome",
+      key: "outcome",
+      width: 100,
+    },
+    {
+      title: "Avg Entry",
+      dataIndex: "avg_entry_price",
+      key: "avg_entry_price",
+      width: 110,
+      render: (value) => formatTokenPrice(value),
+    },
+    {
+      title: "Entry Amt",
+      dataIndex: "entry_amount_usdc",
+      key: "entry_amount_usdc",
+      width: 120,
+      render: (value) => formatUsd(value),
+    },
+    {
+      title: "Buy Qty",
+      dataIndex: "buy_qty",
+      key: "buy_qty",
+      width: 110,
+      render: (value) => formatTokenQty(value),
+    },
+    {
+      title: "Sell Qty",
+      dataIndex: "sell_qty",
+      key: "sell_qty",
+      width: 110,
+      render: (value) => formatTokenQty(value),
+    },
+    {
+      title: "Redeem Qty",
+      dataIndex: "redeem_qty",
+      key: "redeem_qty",
+      width: 120,
+      render: (value) => formatTokenQty(value),
+    },
+    {
+      title: "End Pos",
+      dataIndex: "ending_position_qty",
+      key: "ending_position_qty",
+      width: 110,
+      render: (value) => formatTokenQty(value),
+    },
+    {
+      title: "PnL",
+      dataIndex: "realized_pnl_usdc",
+      key: "realized_pnl_usdc",
+      width: 110,
+      render: (value) => formatUsd(value),
+    },
+    {
+      title: "Trades",
+      dataIndex: "trade_count",
+      key: "trade_count",
+      width: 90,
+    },
+  ];
 
   const pivotColumns = [
     {
@@ -197,22 +301,6 @@ export default function MarketTable({ markets }) {
       width: 130,
       render: (value) => formatUsd(value),
       sorter: (a, b) => Number(a.taker_fee_sum || 0) - Number(b.taker_fee_sum || 0),
-    },
-    {
-      title: "Maker Reward",
-      dataIndex: "maker_reward_sum",
-      key: "maker_reward_sum",
-      width: 140,
-      render: (value) => formatUsd(value),
-      sorter: (a, b) => Number(a.maker_reward_sum || 0) - Number(b.maker_reward_sum || 0),
-    },
-    {
-      title: "Fee Net",
-      dataIndex: "fee_net",
-      key: "fee_net",
-      width: 130,
-      render: (value) => formatUsd(value),
-      sorter: (a, b) => Number(a.fee_net || 0) - Number(b.fee_net || 0),
     },
   ];
 
@@ -323,8 +411,21 @@ export default function MarketTable({ markets }) {
           rowKey="market_slug"
           columns={columns}
           dataSource={markets}
+          expandable={{
+            expandedRowRender: (record) => (
+              <Table
+                size="small"
+                rowKey={(token) => token.token_id}
+                columns={tokenColumns}
+                dataSource={record.tokens || []}
+                pagination={false}
+                scroll={{ x: 860 }}
+              />
+            ),
+            rowExpandable: (record) => Array.isArray(record.tokens) && record.tokens.length > 0,
+          }}
           pagination={{ pageSize: 8 }}
-          scroll={{ x: 1160 }}
+          scroll={{ x: 1020 }}
           sortDirections={["descend", "ascend"]}
         />
       </div>
@@ -340,7 +441,7 @@ export default function MarketTable({ markets }) {
           columns={pivotColumns}
           dataSource={pivotRows}
           pagination={false}
-          scroll={{ x: 980 }}
+          scroll={{ x: 820 }}
           sortDirections={["descend", "ascend"]}
         />
       </div>

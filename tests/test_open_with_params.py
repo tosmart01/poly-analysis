@@ -9,15 +9,13 @@ def _args(**kwargs):
         port=8000,
         browser_timeout_sec=20.0,
         address=None,
-        symbols=None,
-        intervals=None,
+        keywords=None,
         start_time=None,
         end_time=None,
         start_ts=None,
         end_ts=None,
         fee_rate_bps=None,
         missing_cost_warn_qty=None,
-        maker_reward_ratio=None,
         concurrency=None,
         page_limit=None,
         auto_start=False,
@@ -29,16 +27,14 @@ def _args(**kwargs):
 def test_build_bootstrap_query_with_explicit_fields_sets_auto_start():
     args = _args(
         address="0xabc",
-        symbols="btc,eth",
-        intervals="5,15",
+        keywords="updown,15m",
         start_time="2026-03-01 00:00",
         end_time="2026-03-02 00:00",
         concurrency=8,
     )
     query = _build_bootstrap_query(args)
     assert query["address"] == "0xabc"
-    assert query["symbols"] == "btc,eth"
-    assert query["intervals"] == "5,15"
+    assert query["keywords"] == "updown,15m"
     assert query["start_time"] == "2026-03-01 00:00"
     assert query["end_time"] == "2026-03-02 00:00"
     assert query["concurrency"] == "8"

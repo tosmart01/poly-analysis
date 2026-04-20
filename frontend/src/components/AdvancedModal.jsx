@@ -25,11 +25,6 @@ export default function AdvancedModal({ open, onClose, formData, updateField }) 
             </Form.Item>
           </Col>
           <Col xs={24} md={12}>
-            <Form.Item label="Maker Reward Ratio">
-              <Input value={formData.makerRewardRatio} onChange={(event) => updateField("makerRewardRatio", event.target.value)} />
-            </Form.Item>
-          </Col>
-          <Col xs={24} md={12}>
             <Form.Item label="Concurrency">
               <Input value={formData.concurrency} onChange={(event) => updateField("concurrency", event.target.value)} />
             </Form.Item>

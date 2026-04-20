@@ -1,14 +1,19 @@
-from datetime import datetime, timezone
-
 from analysis_poly.models import ActivityRecord, PolymarketMarket, TradeRecord
 from analysis_poly.profit_engine import ProfitEngine, _fee_adjust
 
 
 def test_fee_adjust_basic():
-    adjusted, fee_token, fee_usdc = _fee_adjust(100.0, 0.5, 1000)
-    assert adjusted < 100.0
-    assert fee_token == 100.0 - adjusted
-    assert fee_usdc == fee_token * 0.5
+    adjusted, fee_token, fee_usdc = _fee_adjust(100.0, 0.5, "BUY", {"rate": 0.072})
+    assert adjusted == 96.4
+    assert fee_token == 3.6
+    assert fee_usdc == 1.8
+
+
+def test_fee_adjust_sell_keeps_size_and_charges_usdc_fee():
+    adjusted, fee_token, fee_usdc = _fee_adjust(100.0, 0.5, "SELL", {"rate": 0.072})
+    assert adjusted == 100.0
+    assert fee_token == 0.0
+    assert fee_usdc == 1.8
 
 
 def test_profit_engine_taker_buy_sell_and_redeem_warning():
@@ -19,12 +24,13 @@ def test_profit_engine_taker_buy_sell_and_redeem_warning():
         down_token_id="down_token",
         outcomes=["Up", "Down"],
         outcome_prices=[0.5, 0.5],
+        fee_schedule={"rate": 0.072, "takerOnly": True, "rebateRate": 0.2},
     )
 
     taker_buy = TradeRecord.model_validate(
         {
             "transactionHash": "0x01",
-            "timestamp": 1000,
+            "timestamp": 1774832400,
             "side": "BUY",
             "asset": "up_token",
             "conditionId": "cond1",
@@ -35,7 +41,7 @@ def test_profit_engine_taker_buy_sell_and_redeem_warning():
     taker_sell = TradeRecord.model_validate(
         {
             "transactionHash": "0x02",
-            "timestamp": 1010,
+            "timestamp": 1774832410,
             "side": "SELL",
             "asset": "up_token",
             "conditionId": "cond1",
@@ -46,7 +52,7 @@ def test_profit_engine_taker_buy_sell_and_redeem_warning():
     redeem = ActivityRecord.model_validate(
         {
             "transactionHash": "0x03",
-            "timestamp": 1020,
+            "timestamp": 1774832420,
             "type": "REDEEM",
             "conditionId": "cond1",
             "size": 1,
@@ -54,7 +60,7 @@ def test_profit_engine_taker_buy_sell_and_redeem_warning():
         }
     )
 
-    engine = ProfitEngine(fee_rate_bps=1000, maker_reward_ratio=0.2, missing_cost_warn_qty=0.5)
+    engine = ProfitEngine(fee_rate_bps=1000, missing_cost_warn_qty=0.5)
     report, deltas, warnings = engine.process_market(
         market=market,
         taker_trades=[taker_buy, taker_sell],
@@ -67,6 +73,169 @@ def test_profit_engine_taker_buy_sell_and_redeem_warning():
     assert len(deltas) >= 1
     # outcomePrices not unique winner => redeem skipped warning
     assert any(w.code == "REDEEM_SKIP_UNKNOWN_WINNER" for w in warnings)
+    up = next(t for t in report.tokens if t.token_id == "up_token")
+    assert up.entry_amount_usdc == 5
+    assert up.avg_entry_price is not None
+    assert up.avg_entry_price > 0.5
+
+
+def test_fee_before_hard_coded_window_is_zero_even_with_fee_schedule():
+    market = PolymarketMarket(
+        slug="btc-updown-5m-1767661199",
+        condition_id="cond_fee_before",
+        up_token_id="up_token",
+        down_token_id="down_token",
+        outcomes=["Up", "Down"],
+        outcome_prices=[0.5, 0.5],
+        fee_schedule={"rate": 0.072, "takerOnly": True, "rebateRate": 0.2},
+    )
+
+    taker_buy = TradeRecord.model_validate(
+        {
+            "transactionHash": "0xbefore",
+            "timestamp": 1767661199,
+            "side": "BUY",
+            "asset": "up_token",
+            "conditionId": "cond_fee_before",
+            "size": 100,
+            "price": 0.5,
+        }
+    )
+
+    engine = ProfitEngine(fee_rate_bps=1000, missing_cost_warn_qty=0.5)
+    report, _, _ = engine.process_market(
+        market=market,
+        taker_trades=[taker_buy],
+        all_trades=[taker_buy],
+        split_activities=[],
+        redeem_activities=[],
+    )
+
+    up = next(t for t in report.tokens if t.token_id == "up_token")
+    assert up.buy_qty == 100
+    assert up.taker_fee_usdc == 0
+
+
+def test_hard_coded_window_uses_default_fee_for_updown_5m_buy_and_sell():
+    market = PolymarketMarket(
+        slug="btc-updown-5m-1767661200",
+        condition_id="cond_fee_window",
+        up_token_id="up_token",
+        down_token_id="down_token",
+        outcomes=["Up", "Down"],
+        outcome_prices=[0.5, 0.5],
+        fee_schedule={"rate": 0.072, "takerOnly": True, "rebateRate": 0.2},
+    )
+
+    taker_buy = TradeRecord.model_validate(
+        {
+            "transactionHash": "0xwindow_buy",
+            "timestamp": 1767661200,
+            "side": "BUY",
+            "asset": "up_token",
+            "conditionId": "cond_fee_window",
+            "size": 100,
+            "price": 0.5,
+        }
+    )
+    taker_sell = TradeRecord.model_validate(
+        {
+            "transactionHash": "0xwindow_sell",
+            "timestamp": 1767661210,
+            "side": "SELL",
+            "asset": "up_token",
+            "conditionId": "cond_fee_window",
+            "size": 50,
+            "price": 0.6,
+        }
+    )
+
+    engine = ProfitEngine(fee_rate_bps=123, missing_cost_warn_qty=0.5)
+    report, _, _ = engine.process_market(
+        market=market,
+        taker_trades=[taker_buy, taker_sell],
+        all_trades=[taker_buy, taker_sell],
+        split_activities=[],
+        redeem_activities=[],
+    )
+
+    up = next(t for t in report.tokens if t.token_id == "up_token")
+    assert up.buy_qty == 98.4375
+    assert up.taker_fee_usdc == 1.21325
+
+
+def test_hard_coded_window_ignores_non_updown_5m_15m_slug():
+    market = PolymarketMarket(
+        slug="btc-updown-1h-1767661200",
+        condition_id="cond_fee_window_other",
+        up_token_id="up_token",
+        down_token_id="down_token",
+        outcomes=["Up", "Down"],
+        outcome_prices=[0.5, 0.5],
+        fee_schedule={"rate": 0.072, "takerOnly": True, "rebateRate": 0.2},
+    )
+
+    taker_buy = TradeRecord.model_validate(
+        {
+            "transactionHash": "0xwindow_other",
+            "timestamp": 1767661200,
+            "side": "BUY",
+            "asset": "up_token",
+            "conditionId": "cond_fee_window_other",
+            "size": 100,
+            "price": 0.5,
+        }
+    )
+
+    engine = ProfitEngine(fee_rate_bps=1000, missing_cost_warn_qty=0.5)
+    report, _, _ = engine.process_market(
+        market=market,
+        taker_trades=[taker_buy],
+        all_trades=[taker_buy],
+        split_activities=[],
+        redeem_activities=[],
+    )
+
+    up = next(t for t in report.tokens if t.token_id == "up_token")
+    assert up.buy_qty == 100
+    assert up.taker_fee_usdc == 0
+
+
+def test_fee_after_hard_coded_window_uses_fee_schedule_without_slug_filter():
+    market = PolymarketMarket(
+        slug="non-updown-market-1774832400",
+        condition_id="cond_fee_after",
+        up_token_id="up_token",
+        down_token_id="down_token",
+        outcomes=["Up", "Down"],
+        outcome_prices=[0.5, 0.5],
+        fee_schedule={"rate": 0.072, "takerOnly": True, "rebateRate": 0.2},
+    )
+
+    taker_buy = TradeRecord.model_validate(
+        {
+            "transactionHash": "0xafter",
+            "timestamp": 1774832400,
+            "side": "BUY",
+            "asset": "up_token",
+            "conditionId": "cond_fee_after",
+            "size": 100,
+            "price": 0.5,
+        }
+    )
+
+    engine = ProfitEngine(fee_rate_bps=1000, missing_cost_warn_qty=0.5)
+    report, _, _ = engine.process_market(
+        market=market,
+        taker_trades=[taker_buy],
+        all_trades=[taker_buy],
+        split_activities=[],
+        redeem_activities=[],
+    )
+
+    up = next(t for t in report.tokens if t.token_id == "up_token")
+    assert up.buy_qty == 96.4
+    assert up.taker_fee_usdc == 1.8
 
 
 def test_profit_engine_split_allocation():
@@ -90,7 +259,7 @@ def test_profit_engine_split_allocation():
         }
     )
 
-    engine = ProfitEngine(fee_rate_bps=1000, maker_reward_ratio=0.2, missing_cost_warn_qty=0.5)
+    engine = ProfitEngine(fee_rate_bps=1000, missing_cost_warn_qty=0.5)
     report, _, _ = engine.process_market(
         market=market,
         taker_trades=[],
@@ -105,72 +274,89 @@ def test_profit_engine_split_allocation():
     assert down.split_qty == 3
 
 
-def test_maker_reward_skipped_for_today_market_and_kept_for_history():
-    day_start = int(
-        datetime.now(timezone.utc)
-        .replace(hour=0, minute=0, second=0, microsecond=0)
-        .timestamp()
-    )
-    today_market = PolymarketMarket(
-        slug=f"btc-updown-5m-{day_start + 300}",
-        condition_id="today_cond",
-        up_token_id="up_today",
-        down_token_id="down_today",
-        outcomes=["Up", "Down"],
-        outcome_prices=[0.5, 0.5],
-    )
-    history_market = PolymarketMarket(
-        slug=f"btc-updown-5m-{day_start - 300}",
-        condition_id="history_cond",
-        up_token_id="up_hist",
-        down_token_id="down_hist",
+def test_avg_entry_price_is_weighted_by_all_buy_fills():
+    market = PolymarketMarket(
+        slug="btc-updown-5m-1500",
+        condition_id="cond15",
+        up_token_id="up_token",
+        down_token_id="down_token",
         outcomes=["Up", "Down"],
         outcome_prices=[0.5, 0.5],
     )
 
-    maker_buy_today = TradeRecord.model_validate(
+    buy_a = TradeRecord.model_validate(
         {
-            "transactionHash": "0xmaker_today",
-            "timestamp": day_start + 400,
+            "transactionHash": "0x15a",
+            "timestamp": 1490,
             "side": "BUY",
-            "asset": "up_today",
-            "conditionId": "today_cond",
-            "size": 100,
-            "price": 0.5,
+            "asset": "up_token",
+            "conditionId": "cond15",
+            "size": 10,
+            "price": 0.2,
         }
     )
-    maker_buy_hist = TradeRecord.model_validate(
+    buy_b = TradeRecord.model_validate(
         {
-            "transactionHash": "0xmaker_hist",
-            "timestamp": day_start - 200,
+            "transactionHash": "0x15b",
+            "timestamp": 1495,
             "side": "BUY",
-            "asset": "up_hist",
-            "conditionId": "history_cond",
-            "size": 100,
-            "price": 0.5,
+            "asset": "up_token",
+            "conditionId": "cond15",
+            "size": 30,
+            "price": 0.4,
         }
     )
 
-    engine = ProfitEngine(fee_rate_bps=1000, maker_reward_ratio=0.2, missing_cost_warn_qty=0.5)
-
-    today_report, _, today_warnings = engine.process_market(
-        market=today_market,
-        taker_trades=[],
-        all_trades=[maker_buy_today],
-        split_activities=[],
-        redeem_activities=[],
-    )
-    hist_report, _, _ = engine.process_market(
-        market=history_market,
-        taker_trades=[],
-        all_trades=[maker_buy_hist],
+    engine = ProfitEngine(fee_rate_bps=0, missing_cost_warn_qty=0.5)
+    report, _, _ = engine.process_market(
+        market=market,
+        taker_trades=[buy_a, buy_b],
+        all_trades=[buy_a, buy_b],
         split_activities=[],
         redeem_activities=[],
     )
 
-    assert today_report.maker_reward_usdc == 0
-    assert any(w.code == "MAKER_REWARD_DEFERRED_TODAY" for w in today_warnings)
-    assert hist_report.maker_reward_usdc > 0
+    up = next(t for t in report.tokens if t.token_id == "up_token")
+    assert up.buy_qty == 40
+    assert up.entry_amount_usdc == 14
+    assert up.avg_entry_price == 0.35
+
+
+def test_fees_disabled_does_not_fall_back_to_request_bps():
+    market = PolymarketMarket(
+        slug="btc-updown-5m-1800",
+        condition_id="cond18",
+        up_token_id="up_token",
+        down_token_id="down_token",
+        outcomes=["Up", "Down"],
+        outcome_prices=[0.5, 0.5],
+        fees_enabled=False,
+    )
+
+    taker_buy = TradeRecord.model_validate(
+        {
+            "transactionHash": "0x18",
+            "timestamp": 1800,
+            "side": "BUY",
+            "asset": "up_token",
+            "conditionId": "cond18",
+            "size": 10,
+            "price": 0.5,
+        }
+    )
+
+    engine = ProfitEngine(fee_rate_bps=1000, missing_cost_warn_qty=0.5)
+    report, _, _ = engine.process_market(
+        market=market,
+        taker_trades=[taker_buy],
+        all_trades=[taker_buy],
+        split_activities=[],
+        redeem_activities=[],
+    )
+
+    up = next(t for t in report.tokens if t.token_id == "up_token")
+    assert up.buy_qty == 10
+    assert up.taker_fee_usdc == 0
 
 
 def test_closed_market_without_redeem_settles_remaining_position_by_outcome_prices():
@@ -196,7 +382,7 @@ def test_closed_market_without_redeem_settles_remaining_position_by_outcome_pric
         }
     )
 
-    engine = ProfitEngine(fee_rate_bps=1000, maker_reward_ratio=0.2, missing_cost_warn_qty=0.5)
+    engine = ProfitEngine(fee_rate_bps=1000, missing_cost_warn_qty=0.5)
     report, _, warnings = engine.process_market(
         market=market,
         taker_trades=[taker_buy],
@@ -236,7 +422,7 @@ def test_closed_market_without_redeem_losing_position_counts_as_loss():
         }
     )
 
-    engine = ProfitEngine(fee_rate_bps=1000, maker_reward_ratio=0.2, missing_cost_warn_qty=0.5)
+    engine = ProfitEngine(fee_rate_bps=1000, missing_cost_warn_qty=0.5)
     report, _, warnings = engine.process_market(
         market=market,
         taker_trades=[taker_buy],
@@ -275,7 +461,7 @@ def test_closed_market_without_resolved_outcome_prices_warns_and_keeps_position(
         }
     )
 
-    engine = ProfitEngine(fee_rate_bps=1000, maker_reward_ratio=0.2, missing_cost_warn_qty=0.5)
+    engine = ProfitEngine(fee_rate_bps=1000, missing_cost_warn_qty=0.5)
     report, _, warnings = engine.process_market(
         market=market,
         taker_trades=[taker_buy],

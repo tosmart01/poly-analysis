@@ -11,19 +11,26 @@ from datetime import datetime, timezone
 
 from loguru import logger
 
+from .activity_discovery import (
+    DISCOVERY_ACTIVITY_PAGE_LIMIT_MAX,
+    DiscoveredMarket,
+    collect_user_activity,
+    discover_user_markets_by_day,
+    iter_day_windows,
+)
 from .market_cache import MarketMetadataCache
 from .market_result_cache import AddressMarketResultCache
 from .models import (
     AnalysisReport,
     AnalysisRequest,
     CurvePoint,
+    MakerRebateRecord,
     MarketReport,
     SummaryStats,
     WarningItem,
 )
 from .polymarket_client import PolymarketApiClient
 from .profit_engine import PnlDelta, ProfitEngine, build_curve
-from .slugs import MarketSlugSpec, generate_market_slug_specs
 
 MARKET_FETCH_CONCURRENCY_DEFAULT = 10
 MARKET_TIMESTAMP_CHUNK_SIZE_DEFAULT = 20
@@ -107,12 +114,10 @@ class PolymarketProfitAnalyzer:
         client = PolymarketApiClient(timeout_sec=req.request_timeout_sec)
         engine = ProfitEngine(
             fee_rate_bps=req.fee_rate_bps,
-            maker_reward_ratio=req.maker_reward_ratio,
             missing_cost_warn_qty=req.missing_cost_warn_qty,
         )
         engine_no_fee = ProfitEngine(
             fee_rate_bps=req.fee_rate_bps,
-            maker_reward_ratio=req.maker_reward_ratio,
             missing_cost_warn_qty=req.missing_cost_warn_qty,
             charge_taker_fee=False,
         )
@@ -132,13 +137,24 @@ class PolymarketProfitAnalyzer:
         result_cache_dirty = False
 
         try:
-            specs = generate_market_slug_specs(req.symbols, req.intervals, req.start_ts, req.end_ts)
-            total_markets = len(specs)
-            spec_chunks = _chunk_specs_by_timestamp(specs, self._timestamp_chunk_size)
+            discovered_markets = await discover_user_markets_by_day(
+                client=client,
+                address=req.address,
+                start_ts=req.start_ts,
+                end_ts=req.end_ts,
+                page_limit=req.page_limit,
+                warnings=all_warnings,
+            )
+            discovered_markets = _filter_discovered_markets(
+                discovered_markets,
+                keywords=req.keywords,
+            )
+            total_markets = len(discovered_markets)
             logger.info(
-                "analyzer prepared spec_count={} timestamp_chunks={} market_fetch_concurrency={} process_concurrency={}",
-                len(specs),
-                len(spec_chunks),
+                "analyzer discovered markets address={} market_count={} keywords={} market_fetch_concurrency={} process_concurrency={}",
+                req.address,
+                total_markets,
+                ",".join(req.keywords),
                 self._market_fetch_concurrency,
                 max(1, req.concurrency),
             )
@@ -147,110 +163,156 @@ class PolymarketProfitAnalyzer:
             process_concurrency = max(1, req.concurrency)
             processed_count = 0
 
-            for spec_chunk in spec_chunks:
+            if stop_event.is_set():
+                discovered_markets = []
+
+            slug_to_market = {
+                slug: market
+                for slug, market in await self._fetch_markets_with_status(
+                    client,
+                    [item.slug for item in discovered_markets],
+                    self._market_fetch_concurrency,
+                )
+                if market is not None
+            }
+
+            for batch_start in range(0, len(discovered_markets), process_concurrency):
                 if stop_event.is_set():
                     break
 
-                chunk_slugs = [s.slug for s in spec_chunk]
-                chunk_fetch_results = await self._fetch_markets_with_status(
-                    client,
-                    chunk_slugs,
-                    self._market_fetch_concurrency,
-                )
-                chunk_markets = [market for _, market in chunk_fetch_results if market is not None]
-                chunk_markets.sort(key=lambda m: _market_order_key(m.slug))
+                batch_refs = discovered_markets[batch_start : batch_start + process_concurrency]
+                batch_markets = []
+                missing_refs: list[DiscoveredMarket] = []
+                for ref in batch_refs:
+                    market = slug_to_market.get(ref.slug)
+                    if market is None:
+                        missing_refs.append(ref)
+                        warning = WarningItem(
+                            timestamp=ref.first_activity_ts,
+                            market_slug=ref.slug,
+                            code="DISCOVERY_MARKET_METADATA_MISSING",
+                            message="market metadata not found for discovered slug",
+                        )
+                        all_warnings.append(warning)
+                        await hooks.on_warning(warning)
+                        continue
+                    batch_markets.append(market)
 
-                for batch_start in range(0, len(chunk_markets), process_concurrency):
+                if missing_refs:
+                    processed_count += len(missing_refs)
+                    await hooks.on_progress(processed_count, total_markets, missing_refs[-1].slug)
+
+                if not batch_markets:
+                    continue
+
+                batch_results = await asyncio.gather(
+                    *(
+                        self._process_single_market(
+                            client=client,
+                            engine=engine,
+                            engine_no_fee=engine_no_fee,
+                            address=req.address,
+                            address_market_cache=address_market_cache,
+                            req=req,
+                            market=market,
+                        )
+                        for market in batch_markets
+                    )
+                )
+                batch_results.sort(key=lambda x: _market_order_key(x.market_slug))
+
+                for result in batch_results:
                     if stop_event.is_set():
                         break
 
-                    batch_markets = chunk_markets[batch_start : batch_start + process_concurrency]
-                    batch_results = await asyncio.gather(
-                        *(
-                            self._process_single_market(
-                                client=client,
-                                engine=engine,
-                                engine_no_fee=engine_no_fee,
-                                address=req.address,
-                                address_market_cache=address_market_cache,
-                                req=req,
-                                market=market,
-                            )
-                            for market in batch_markets
+                    processed_count += 1
+                    has_trade_activity = _has_market_trade_activity(result.market_report)
+                    if has_trade_activity:
+                        market_reports.append(result.market_report)
+                        total_deltas.extend(result.deltas)
+                        total_deltas_no_fee.extend(result.deltas_no_fee)
+                        if result.deltas:
+                            market_deltas[result.market_slug].extend(result.deltas)
+                        if result.deltas_no_fee:
+                            market_deltas_no_fee[result.market_slug].extend(result.deltas_no_fee)
+                    else:
+                        logger.debug("skip market without trades in output slug={}", result.market_slug)
+
+                    for warning in result.warnings:
+                        all_warnings.append(warning)
+                        await hooks.on_warning(warning)
+                    if result.cache_updated:
+                        result_cache_dirty = True
+
+                    for delta in result.deltas:
+                        total_by_ts[delta.timestamp] += delta.delta_pnl_usdc
+                        market_by_ts[delta.market_slug][delta.timestamp] += delta.delta_pnl_usdc
+
+                        total_cumulative = _cumulative_at(total_by_ts, delta.timestamp)
+                        market_cumulative = _cumulative_at(market_by_ts[delta.market_slug], delta.timestamp)
+
+                        await hooks.on_total_point(
+                            delta.timestamp,
+                            delta.delta_pnl_usdc,
+                            total_cumulative,
                         )
-                    )
-                    # Keep push order stable by market timestamp inside one concurrent batch.
-                    batch_results.sort(key=lambda x: _market_order_key(x.market_slug))
+                        await hooks.on_market_point(
+                            delta.market_slug,
+                            delta.timestamp,
+                            delta.delta_pnl_usdc,
+                            market_cumulative,
+                        )
 
-                    for result in batch_results:
-                        if stop_event.is_set():
-                            break
+                    for delta in result.deltas_no_fee:
+                        total_by_ts_no_fee[delta.timestamp] += delta.delta_pnl_usdc
+                        market_by_ts_no_fee[delta.market_slug][delta.timestamp] += delta.delta_pnl_usdc
 
-                        processed_count += 1
-                        has_trade_activity = _has_market_trade_activity(result.market_report)
-                        if has_trade_activity:
-                            market_reports.append(result.market_report)
-                            total_deltas.extend(result.deltas)
-                            total_deltas_no_fee.extend(result.deltas_no_fee)
-                            if result.deltas:
-                                market_deltas[result.market_slug].extend(result.deltas)
-                            if result.deltas_no_fee:
-                                market_deltas_no_fee[result.market_slug].extend(result.deltas_no_fee)
-                        else:
-                            logger.debug("skip market without trades in output slug={}", result.market_slug)
+                        total_cumulative_no_fee = _cumulative_at(total_by_ts_no_fee, delta.timestamp)
+                        market_cumulative_no_fee = _cumulative_at(
+                            market_by_ts_no_fee[delta.market_slug], delta.timestamp
+                        )
 
-                        for warning in result.warnings:
-                            all_warnings.append(warning)
-                            await hooks.on_warning(warning)
-                        if result.cache_updated:
-                            result_cache_dirty = True
+                        await hooks.on_total_point_no_fee(
+                            delta.timestamp,
+                            delta.delta_pnl_usdc,
+                            total_cumulative_no_fee,
+                        )
+                        await hooks.on_market_point_no_fee(
+                            delta.market_slug,
+                            delta.timestamp,
+                            delta.delta_pnl_usdc,
+                            market_cumulative_no_fee,
+                        )
 
-                        for delta in result.deltas:
-                            total_by_ts[delta.timestamp] += delta.delta_pnl_usdc
-                            market_by_ts[delta.market_slug][delta.timestamp] += delta.delta_pnl_usdc
+                    await hooks.on_progress(processed_count, total_markets, result.market_slug)
 
-                            total_cumulative = _cumulative_at(total_by_ts, delta.timestamp)
-                            market_cumulative = _cumulative_at(market_by_ts[delta.market_slug], delta.timestamp)
+            maker_rebate_records, maker_rebate_deltas = await self._collect_maker_rebate_deltas(
+                client=client,
+                address=req.address,
+                start_ts=req.start_ts,
+                end_ts=req.end_ts,
+                page_limit=req.page_limit,
+                warnings=all_warnings,
+            )
+            for delta in maker_rebate_deltas:
+                total_deltas.append(delta)
+                total_deltas_no_fee.append(delta)
+                total_by_ts[delta.timestamp] += delta.delta_pnl_usdc
+                total_by_ts_no_fee[delta.timestamp] += delta.delta_pnl_usdc
 
-                            await hooks.on_total_point(
-                                delta.timestamp,
-                                delta.delta_pnl_usdc,
-                                total_cumulative,
-                            )
-                            await hooks.on_market_point(
-                                delta.market_slug,
-                                delta.timestamp,
-                                delta.delta_pnl_usdc,
-                                market_cumulative,
-                            )
+                total_cumulative = _cumulative_at(total_by_ts, delta.timestamp)
+                total_cumulative_no_fee = _cumulative_at(total_by_ts_no_fee, delta.timestamp)
 
-                        for delta in result.deltas_no_fee:
-                            total_by_ts_no_fee[delta.timestamp] += delta.delta_pnl_usdc
-                            market_by_ts_no_fee[delta.market_slug][delta.timestamp] += delta.delta_pnl_usdc
-
-                            total_cumulative_no_fee = _cumulative_at(total_by_ts_no_fee, delta.timestamp)
-                            market_cumulative_no_fee = _cumulative_at(
-                                market_by_ts_no_fee[delta.market_slug], delta.timestamp
-                            )
-
-                            await hooks.on_total_point_no_fee(
-                                delta.timestamp,
-                                delta.delta_pnl_usdc,
-                                total_cumulative_no_fee,
-                            )
-                            await hooks.on_market_point_no_fee(
-                                delta.market_slug,
-                                delta.timestamp,
-                                delta.delta_pnl_usdc,
-                                market_cumulative_no_fee,
-                            )
-
-                        await hooks.on_progress(processed_count, total_markets, result.market_slug)
-
-                missing_count = sum(1 for _, market in chunk_fetch_results if market is None)
-                if missing_count > 0:
-                    processed_count += missing_count
-                    await hooks.on_progress(processed_count, total_markets, chunk_slugs[-1])
+                await hooks.on_total_point(
+                    delta.timestamp,
+                    delta.delta_pnl_usdc,
+                    total_cumulative,
+                )
+                await hooks.on_total_point_no_fee(
+                    delta.timestamp,
+                    delta.delta_pnl_usdc,
+                    total_cumulative_no_fee,
+                )
 
             total_curve = [
                 CurvePoint(
@@ -297,9 +359,13 @@ class PolymarketProfitAnalyzer:
                 ]
 
             summary = SummaryStats(
-                total_realized_pnl_usdc=round(sum(m.realized_pnl_usdc for m in market_reports), 10),
+                total_realized_pnl_usdc=round(
+                    sum(m.realized_pnl_usdc for m in market_reports)
+                    + sum(delta.delta_pnl_usdc for delta in maker_rebate_deltas),
+                    10,
+                ),
                 total_taker_fee_usdc=round(sum(m.taker_fee_usdc for m in market_reports), 10),
-                total_maker_reward_usdc=round(sum(m.maker_reward_usdc for m in market_reports), 10),
+                total_maker_reward_usdc=round(sum(delta.delta_pnl_usdc for delta in maker_rebate_deltas), 10),
                 markets_total=total_markets,
                 markets_processed=len(market_reports),
             )
@@ -308,6 +374,7 @@ class PolymarketProfitAnalyzer:
                 request=req,
                 summary=summary,
                 markets=sorted(market_reports, key=lambda x: x.market_slug),
+                maker_rebates=maker_rebate_records,
                 total_curve=total_curve,
                 market_curves=market_curves,
                 total_curve_no_fee=total_curve_no_fee,
@@ -324,6 +391,51 @@ class PolymarketProfitAnalyzer:
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("market result cache save failed address={} error={}", req.address, exc)
             await client.aclose()
+
+    async def _collect_maker_rebate_deltas(
+        self,
+        client: PolymarketApiClient,
+        address: str,
+        start_ts: int,
+        end_ts: int,
+        page_limit: int,
+        warnings: list[WarningItem],
+    ) -> tuple[list[MakerRebateRecord], list[PnlDelta]]:
+        records_out: list[MakerRebateRecord] = []
+        deltas: list[PnlDelta] = []
+        capped_page_limit = min(max(1, page_limit), DISCOVERY_ACTIVITY_PAGE_LIMIT_MAX)
+
+        for window_start, window_end in iter_day_windows(start_ts, end_ts):
+            day_records = await collect_user_activity(
+                client=client,
+                address=address,
+                start_ts=window_start,
+                end_ts=window_end,
+                page_limit=capped_page_limit,
+                warnings=warnings,
+                activity_types=("MAKER_REBATE",),
+            )
+            for record in day_records:
+                rebate_value = float(record.usdc_size or record.size or 0.0)
+                if rebate_value == 0:
+                    continue
+                records_out.append(
+                    MakerRebateRecord(
+                        timestamp=int(record.timestamp),
+                        usdc_size=rebate_value,
+                    )
+                )
+                deltas.append(
+                    PnlDelta(
+                        timestamp=int(record.timestamp),
+                        market_slug="__maker_rebate__",
+                        token_id="",
+                        delta_pnl_usdc=rebate_value,
+                    )
+                )
+
+        records_out.sort(key=lambda item: item.timestamp, reverse=True)
+        return records_out, sorted(deltas, key=lambda item: item.timestamp)
 
     async def _fetch_markets_with_status(
         self,
@@ -463,24 +575,21 @@ class PolymarketProfitAnalyzer:
 
         with Path(path).open("w", newline="", encoding="utf-8") as fp:
             writer = csv.writer(fp)
-            writer.writerow(
-                [
-                    "market_slug",
-                    "timestamp",
-                    "delta_realized_pnl_usdc",
-                    "cumulative_realized_pnl_usdc",
-                ]
-            )
-            for market_slug, points in report.market_curves.items():
-                for p in points:
-                    writer.writerow(
-                        [
-                            market_slug,
-                            p.timestamp,
-                            p.delta_realized_pnl_usdc,
-                            p.cumulative_realized_pnl_usdc,
-                        ]
-                    )
+            writer.writerow(_MARKET_TABLE_CSV_COLUMNS)
+            for market in report.markets:
+                avg_entry_price = _market_avg_entry_price(market)
+                writer.writerow(
+                    [
+                        market.market_slug,
+                        _market_trade_time(market.market_slug),
+                        market.realized_pnl_usdc,
+                        market.taker_fee_usdc,
+                        market.maker_reward_usdc,
+                        _market_entry_side(market),
+                        _market_entry_amount(market),
+                        "" if avg_entry_price is None else avg_entry_price,
+                    ]
+                )
         return path
 
     def save_curve_csv(self, report: AnalysisReport, path: str | None = None) -> str:
@@ -506,6 +615,60 @@ def _market_order_key(slug: str) -> tuple[int, str]:
 
 def _has_market_trade_activity(market_report: MarketReport) -> bool:
     return any(token.trade_count > 0 for token in market_report.tokens)
+
+
+_MARKET_TABLE_CSV_COLUMNS = [
+    "Market",
+    "Trade Time",
+    "Realized PnL",
+    "Taker Fee",
+    "Maker Reward",
+    "Entry Side",
+    "Entry Amt",
+    "Avg Entry",
+]
+
+
+def _market_ts(market_slug: str) -> int | None:
+    try:
+        ts = int(str(market_slug or "").split("-")[-1])
+    except ValueError:
+        return None
+    if ts <= 0:
+        return None
+    return ts
+
+
+def _market_trade_time(market_slug: str) -> str:
+    ts = _market_ts(market_slug)
+    if ts is None:
+        return "-"
+    return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _market_entry_side(market_report: MarketReport) -> str:
+    sides = []
+    for token in market_report.tokens:
+        if token.buy_qty > 0 or token.entry_amount_usdc > 0:
+            sides.append(token.outcome)
+
+    unique_sides = list(dict.fromkeys(side for side in sides if side))
+    if not unique_sides:
+        return "-"
+    if len(unique_sides) == 1:
+        return unique_sides[0]
+    return "Both"
+
+
+def _market_entry_amount(market_report: MarketReport) -> float:
+    return round(sum(token.entry_amount_usdc for token in market_report.tokens), 10)
+
+
+def _market_avg_entry_price(market_report: MarketReport) -> float | None:
+    total_buy_qty = sum(token.buy_qty for token in market_report.tokens)
+    if total_buy_qty <= 1e-12:
+        return None
+    return round(_market_entry_amount(market_report) / total_buy_qty, 10)
 
 
 def _chunk_specs_by_timestamp(
@@ -545,6 +708,11 @@ def _result_to_cache_payload(result: _MarketProcessResult) -> dict:
 
 def _result_from_cache_payload(slug: str, payload: dict) -> _MarketProcessResult | None:
     try:
+        if not _cache_payload_has_entry_fields(payload.get("market_report")):
+            return None
+        if not _cache_payload_has_entry_fields(payload.get("market_report_no_fee")):
+            return None
+
         market_report = MarketReport.model_validate(payload["market_report"])
         market_report_no_fee = MarketReport.model_validate(payload["market_report_no_fee"])
         deltas = [_delta_from_dict(d) for d in payload.get("deltas", [])]
@@ -560,6 +728,32 @@ def _result_from_cache_payload(slug: str, payload: dict) -> _MarketProcessResult
         )
     except Exception:  # noqa: BLE001
         return None
+
+
+def _cache_payload_has_entry_fields(report_payload: dict | None) -> bool:
+    if not isinstance(report_payload, dict):
+        return False
+
+    if abs(float(report_payload.get("maker_reward_usdc", 0) or 0)) > 1e-12:
+        return False
+
+    tokens = report_payload.get("tokens", [])
+    if not isinstance(tokens, list):
+        return False
+
+    for token in tokens:
+        if not isinstance(token, dict):
+            return False
+        if abs(float(token.get("maker_reward_usdc", 0) or 0)) > 1e-12:
+            return False
+        buy_qty = float(token.get("buy_qty", 0) or 0)
+        if buy_qty <= 0:
+            continue
+        if "entry_amount_usdc" not in token:
+            return False
+        if "avg_entry_price" not in token:
+            return False
+    return True
 
 
 def _delta_to_dict(delta: PnlDelta) -> dict:
@@ -585,3 +779,21 @@ def _is_market_result_cache_eligible(slug: str, now_ts: int, recent_window_sec: 
     if market_ts >= 10**18:
         return False
     return (now_ts - market_ts) > recent_window_sec
+
+
+def _filter_discovered_markets(
+    discovered_markets: list[DiscoveredMarket],
+    keywords: list[str],
+) -> list[DiscoveredMarket]:
+    return [item for item in discovered_markets if _slug_matches_filters(item.slug, keywords=keywords)]
+
+
+def _slug_matches_filters(slug: str, keywords: list[str]) -> bool:
+    normalized_slug = str(slug or "").strip().lower()
+    if not normalized_slug:
+        return False
+
+    if keywords and not any(keyword in normalized_slug for keyword in keywords):
+        return False
+
+    return True

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class RunStatus(str, Enum):
@@ -20,10 +20,8 @@ class AnalysisRequest(BaseModel):
     address: str
     start_ts: int
     end_ts: int
-    symbols: list[Literal["btc", "eth", "sol", "xrp"]]
-    intervals: list[int]
+    keywords: list[str] = Field(default_factory=list)
     fee_rate_bps: float = 1000
-    maker_reward_ratio: float = 0.2
     missing_cost_warn_qty: float = 0.5
     page_limit: int = 1000
     concurrency: int = 5
@@ -33,27 +31,12 @@ class AnalysisRequest(BaseModel):
     @field_validator("address")
     @classmethod
     def validate_address(cls, value: str) -> str:
-        lowered = value.lower().strip()
-        if not lowered.startswith("0x"):
-            raise ValueError("address must start with 0x")
-        return lowered
+        return _normalize_address(value)
 
-    @field_validator("symbols")
+    @field_validator("keywords")
     @classmethod
-    def validate_symbols(cls, value: list[str]) -> list[str]:
-        if not value:
-            raise ValueError("symbols cannot be empty")
-        uniq = sorted(set(value))
-        return uniq
-
-    @field_validator("intervals")
-    @classmethod
-    def validate_intervals(cls, value: list[int]) -> list[int]:
-        if not value:
-            raise ValueError("intervals cannot be empty")
-        if any(v <= 0 for v in value):
-            raise ValueError("intervals must be > 0")
-        return sorted(set(value))
+    def validate_keywords(cls, value: list[str]) -> list[str]:
+        return _normalize_string_list(value)
 
     @model_validator(mode="after")
     def validate_time_range(self) -> "AnalysisRequest":
@@ -99,6 +82,8 @@ class CurvePoint(BaseModel):
 class TokenReport(BaseModel):
     token_id: str
     outcome: Literal["Up", "Down"]
+    entry_amount_usdc: float = 0
+    avg_entry_price: float | None = None
     realized_pnl_usdc: float = 0
     taker_fee_usdc: float = 0
     maker_reward_usdc: float = 0
@@ -131,10 +116,16 @@ class SummaryStats(BaseModel):
     markets_processed: int = 0
 
 
+class MakerRebateRecord(BaseModel):
+    timestamp: int
+    usdc_size: float
+
+
 class AnalysisReport(BaseModel):
     request: AnalysisRequest
     summary: SummaryStats
     markets: list[MarketReport]
+    maker_rebates: list[MakerRebateRecord] = Field(default_factory=list)
     total_curve: list[CurvePoint]
     market_curves: dict[str, list[CurvePoint]]
     total_curve_no_fee: list[CurvePoint] = Field(default_factory=list)
@@ -144,13 +135,26 @@ class AnalysisReport(BaseModel):
     artifacts: dict[str, str] = Field(default_factory=dict)
 
 
+class FeeSchedule(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    exponent: int | None = None
+    rate: float = 0
+    taker_only: bool = Field(default=False, alias="takerOnly")
+    rebate_rate: float = Field(default=0, alias="rebateRate")
+
+
 class PolymarketMarket(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     slug: str
     condition_id: str
     up_token_id: str
     down_token_id: str
     outcomes: list[str]
     outcome_prices: list[float]
+    fees_enabled: bool = Field(default=True, alias="feesEnabled")
+    fee_schedule: FeeSchedule | None = Field(default=None, alias="feeSchedule")
     closed: bool = False
     outcome: str | None = None
 
@@ -183,3 +187,14 @@ class StreamEvent(BaseModel):
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _normalize_address(value: str) -> str:
+    lowered = value.lower().strip()
+    if not lowered.startswith("0x"):
+        raise ValueError("address must start with 0x")
+    return lowered
+
+
+def _normalize_string_list(value: list[str]) -> list[str]:
+    return sorted({str(item).strip().lower() for item in value if str(item).strip()})

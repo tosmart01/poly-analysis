@@ -51,19 +51,18 @@ export default function ConfigPanel({
     <section className="config-card">
       <Form layout="vertical" requiredMark={false} className="config-form">
         <Row gutter={[10, 4]} align="bottom">
-          <Col xs={24} lg={11}>
+          <Col xs={24} lg={14}>
             <Form.Item label="Address">
               <Input value={formData.address} onChange={(event) => updateField("address", event.target.value)} />
             </Form.Item>
           </Col>
-          <Col xs={24} md={12} lg={7}>
-            <Form.Item label="Symbols">
-              <Input value={formData.symbols} onChange={(event) => updateField("symbols", event.target.value)} />
-            </Form.Item>
-          </Col>
-          <Col xs={12} md={6} lg={4}>
-            <Form.Item label="Intervals">
-              <Input value={formData.intervals} onChange={(event) => updateField("intervals", event.target.value)} />
+          <Col xs={12} md={6} lg={8}>
+            <Form.Item label="Keywords">
+              <Input
+                value={formData.keywords}
+                onChange={(event) => updateField("keywords", event.target.value)}
+                placeholder="updown,15m"
+              />
             </Form.Item>
           </Col>
           <Col xs={12} md={6} lg={2}>

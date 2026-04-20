@@ -36,13 +36,11 @@ def _build_bootstrap_query(args: argparse.Namespace) -> dict[str, str]:
 
     mapping = {
         "address": "address",
-        "symbols": "symbols",
-        "intervals": "intervals",
+        "keywords": "keywords",
         "start_time": "start_time",
         "end_time": "end_time",
         "fee_rate_bps": "fee_rate_bps",
         "missing_cost_warn_qty": "missing_cost_warn_qty",
-        "maker_reward_ratio": "maker_reward_ratio",
         "concurrency": "concurrency",
         "page_limit": "page_limit",
     }
@@ -61,13 +59,11 @@ def _build_bootstrap_query(args: argparse.Namespace) -> dict[str, str]:
         key in params
         for key in {
             "address",
-            "symbols",
-            "intervals",
+            "keywords",
             "start_time",
             "end_time",
             "fee_rate_bps",
             "missing_cost_warn_qty",
-            "maker_reward_ratio",
             "concurrency",
             "page_limit",
         }
@@ -106,15 +102,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--browser-timeout-sec", type=float, default=20.0, help="Wait timeout for browser auto-open")
 
     parser.add_argument("--address")
-    parser.add_argument("--symbols", help='Comma-separated, e.g. "btc,eth,sol"')
-    parser.add_argument("--intervals", help='Comma-separated, e.g. "5,15"')
+    parser.add_argument("--keywords", help='Comma-separated slug keywords, e.g. "updown,15m"')
     parser.add_argument("--start-time", help='Local datetime, format "YYYY-MM-DD HH:MM"')
     parser.add_argument("--end-time", help='Local datetime, format "YYYY-MM-DD HH:MM"')
     parser.add_argument("--start-ts", type=int, help="Unix timestamp (seconds), used when --start-time is missing")
     parser.add_argument("--end-ts", type=int, help="Unix timestamp (seconds), used when --end-time is missing")
     parser.add_argument("--fee-rate-bps", type=float)
     parser.add_argument("--missing-cost-warn-qty", type=float)
-    parser.add_argument("--maker-reward-ratio", type=float)
     parser.add_argument("--concurrency", type=int)
     parser.add_argument("--page-limit", type=int)
     parser.add_argument("--auto-start", action="store_true", help="Force auto start analysis in frontend")

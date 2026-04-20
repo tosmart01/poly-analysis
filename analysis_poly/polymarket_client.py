@@ -9,7 +9,7 @@ from .models import ActivityRecord, PolymarketMarket, TradeRecord
 
 
 class PolymarketApiClient:
-    def __init__(self, timeout_sec: float = 20, retries: int = 5):
+    def __init__(self, timeout_sec: float = 30, retries: int = 5):
         self._timeout_sec = timeout_sec
         self._retries = retries
         self._gamma_base = "https://gamma-api.polymarket.com"
@@ -55,7 +55,7 @@ class PolymarketApiClient:
         outcome_prices = [float(x) for x in _parse_json_field(outcome_prices_raw, fallback=[])]
         token_ids = [str(x) for x in _parse_json_field(tokens_raw, fallback=[])]
 
-        if len(token_ids) < 2:
+        if len(token_ids) != 2:
             return None
 
         return PolymarketMarket(
@@ -65,6 +65,8 @@ class PolymarketApiClient:
             down_token_id=token_ids[1],
             outcomes=outcomes,
             outcome_prices=outcome_prices,
+            fees_enabled=bool(data.get("feesEnabled", data.get("fees_enabled", True))),
+            fee_schedule=data.get("feeSchedule") or data.get("fee_schedule"),
             closed=bool(data.get("closed", False)),
         )
 
@@ -123,6 +125,35 @@ class PolymarketApiClient:
                 break
             offset += len(page)
         return records
+
+    async def get_user_activity_page(
+        self,
+        user: str,
+        activity_types: list[str] | tuple[str, ...] | None = None,
+        start_ts: int | None = None,
+        end_ts: int | None = None,
+        limit: int = 500,
+        offset: int = 0,
+        sort_direction: str = "ASC",
+    ) -> list[ActivityRecord]:
+        params: dict[str, Any] = {
+            "user": user,
+            "sortBy": "TIMESTAMP",
+            "sortDirection": sort_direction,
+            "limit": limit,
+            "offset": offset,
+        }
+        if activity_types:
+            params["type"] = ",".join(str(item).strip().upper() for item in activity_types if str(item).strip())
+        if start_ts is not None:
+            params["start"] = start_ts
+        if end_ts is not None:
+            params["end"] = end_ts
+
+        data = await self._request_json("GET", f"{self._data_base}/activity", params=params)
+        if not data:
+            return []
+        return [ActivityRecord.model_validate(item) for item in data]
 
 
 

@@ -30,6 +30,18 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
+    return await _render_app_page(
+        request=request,
+        default_address="",
+        default_keywords="",
+    )
+
+
+async def _render_app_page(
+    request: Request,
+    default_address: str,
+    default_keywords: str,
+):
     app_js = STATIC_DIR / "dist" / "app.js"
     app_css = STATIC_DIR / "dist" / "app.css"
     static_version = str(
@@ -39,9 +51,8 @@ async def index(request: Request):
         request=request,
         name="index.html",
         context={
-            "default_address": "",
-            "default_symbols": "btc,eth,sol,xrp",
-            "default_intervals": "5,15",
+            "default_address": default_address,
+            "default_keywords": default_keywords,
             "static_version": static_version,
         },
     )

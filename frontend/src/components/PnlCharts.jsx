@@ -4,6 +4,13 @@ import dayjs from "dayjs";
 import { Button, Card, Col, Row, Segmented, Space } from "antd";
 import { symbolColor } from "../utils/format";
 
+const AGGREGATION_BUCKETS = {
+  raw: 0,
+  "15m": 15 * 60,
+  "1h": 60 * 60,
+  "1d": 24 * 60 * 60,
+};
+
 function axisTimeLabel(value) {
   return dayjs(Number(value) * 1000).format("MM/DD HH:mm");
 }
@@ -115,17 +122,66 @@ function marketPrefixColor(prefix) {
   return symbolColor(key);
 }
 
+function aggregateTs(ts, aggregation) {
+  const bucketSize = AGGREGATION_BUCKETS[aggregation] || 0;
+  const numericTs = Number(ts || 0);
+  if (!bucketSize || !Number.isFinite(numericTs) || numericTs <= 0) {
+    return numericTs;
+  }
+  return Math.floor(numericTs / bucketSize) * bucketSize;
+}
+
+function aggregateSeriesPoints(points, aggregation) {
+  if (aggregation === "raw") {
+    return points || [];
+  }
+  const bucketed = new Map();
+  for (const point of points || []) {
+    const bucketTs = aggregateTs(point.ts, aggregation);
+    bucketed.set(bucketTs, {
+      ts: bucketTs,
+      value: Number(point.value || 0),
+    });
+  }
+  return [...bucketed.values()].sort((a, b) => Number(a.ts) - Number(b.ts));
+}
+
 export default function PnlCharts({ totalSeries, totalSeriesNoFee, symbolSeries, symbolSeriesNoFee, drawdownMarkers }) {
   const [viewMode, setViewMode] = useState("net");
   const [showDrawdownMarks, setShowDrawdownMarks] = useState(false);
+  const [aggregation, setAggregation] = useState("15m");
 
   const showNet = viewMode === "net" || viewMode === "compare";
   const showNoFee = viewMode === "no_fee" || viewMode === "compare";
 
+  const aggregatedTotalSeries = useMemo(
+    () => aggregateSeriesPoints(totalSeries, aggregation),
+    [totalSeries, aggregation],
+  );
+  const aggregatedTotalSeriesNoFee = useMemo(
+    () => aggregateSeriesPoints(totalSeriesNoFee, aggregation),
+    [totalSeriesNoFee, aggregation],
+  );
+  const aggregatedSymbolSeries = useMemo(() => {
+    const next = {};
+    Object.entries(symbolSeries || {}).forEach(([symbol, points]) => {
+      next[symbol] = aggregateSeriesPoints(points, aggregation);
+    });
+    return next;
+  }, [symbolSeries, aggregation]);
+  const aggregatedSymbolSeriesNoFee = useMemo(() => {
+    const next = {};
+    Object.entries(symbolSeriesNoFee || {}).forEach(([symbol, points]) => {
+      next[symbol] = aggregateSeriesPoints(points, aggregation);
+    });
+    return next;
+  }, [symbolSeriesNoFee, aggregation]);
+
   const totalOption = useMemo(() => {
-    const netMap = seriesMap(totalSeries);
-    const noFeeMap = seriesMap(totalSeriesNoFee);
+    const netMap = seriesMap(aggregatedTotalSeries);
+    const noFeeMap = seriesMap(aggregatedTotalSeriesNoFee);
     const xData = unionSortedTimestamps(showNet ? netMap : new Map(), showNoFee ? noFeeMap : new Map());
+    const xIndexByTs = new Map(xData.map((ts, index) => [ts, index]));
 
     const series = [];
     const drawdownByTs = new Map();
@@ -150,16 +206,17 @@ export default function PnlCharts({ totalSeries, totalSeriesNoFee, symbolSeries,
       if (showDrawdownMarks) {
         const markerData = (drawdownMarkers || [])
           .map((marker) => {
-            if (!netMap.has(marker.ts)) {
+            const markerTs = aggregateTs(marker.ts, aggregation);
+            if (!netMap.has(markerTs)) {
               return null;
             }
-            const tsIndex = xData.indexOf(marker.ts);
-            if (tsIndex < 0) {
+            const tsIndex = xIndexByTs.get(markerTs);
+            if (tsIndex == null) {
               return null;
             }
             return {
-              coord: [tsIndex, netMap.get(marker.ts)],
-              ts: marker.ts,
+              coord: [tsIndex, netMap.get(markerTs)],
+              ts: markerTs,
               slug: marker.marketSlug,
               drawdown: marker.delta,
             };
@@ -288,23 +345,31 @@ export default function PnlCharts({ totalSeries, totalSeriesNoFee, symbolSeries,
       },
       series,
     };
-  }, [totalSeries, totalSeriesNoFee, showNet, showNoFee, showDrawdownMarks, drawdownMarkers]);
+  }, [
+    aggregatedTotalSeries,
+    aggregatedTotalSeriesNoFee,
+    aggregation,
+    showNet,
+    showNoFee,
+    showDrawdownMarks,
+    drawdownMarkers,
+  ]);
 
   const symbolOption = useMemo(() => {
     const symbolSet = new Set();
     if (showNet) {
-      Object.keys(symbolSeries || {}).forEach((symbol) => symbolSet.add(symbol));
+      Object.keys(aggregatedSymbolSeries || {}).forEach((symbol) => symbolSet.add(symbol));
     }
     if (showNoFee) {
-      Object.keys(symbolSeriesNoFee || {}).forEach((symbol) => symbolSet.add(symbol));
+      Object.keys(aggregatedSymbolSeriesNoFee || {}).forEach((symbol) => symbolSet.add(symbol));
     }
     const symbols = [...symbolSet].sort();
 
     const mapsBySymbolNet = {};
     const mapsBySymbolNoFee = {};
     symbols.forEach((symbol) => {
-      mapsBySymbolNet[symbol] = seriesMap((symbolSeries || {})[symbol] || []);
-      mapsBySymbolNoFee[symbol] = seriesMap((symbolSeriesNoFee || {})[symbol] || []);
+      mapsBySymbolNet[symbol] = seriesMap((aggregatedSymbolSeries || {})[symbol] || []);
+      mapsBySymbolNoFee[symbol] = seriesMap((aggregatedSymbolSeriesNoFee || {})[symbol] || []);
     });
 
     const allTsSet = new Set();
@@ -319,6 +384,7 @@ export default function PnlCharts({ totalSeries, totalSeriesNoFee, symbolSeries,
       }
     });
     const xData = [...allTsSet].sort((a, b) => a - b);
+    const xIndexByTs = new Map(xData.map((ts, index) => [ts, index]));
 
     const series = [];
     const drawdownByTs = new Map();
@@ -347,16 +413,17 @@ export default function PnlCharts({ totalSeries, totalSeriesNoFee, symbolSeries,
           const markerData = (drawdownMarkers || [])
             .filter((marker) => marker.marketPrefix === symbol)
             .map((marker) => {
-              if (!mapsBySymbolNet[symbol].has(marker.ts)) {
+              const markerTs = aggregateTs(marker.ts, aggregation);
+              if (!mapsBySymbolNet[symbol].has(markerTs)) {
                 return null;
               }
-              const tsIndex = xData.indexOf(marker.ts);
-              if (tsIndex < 0) {
+              const tsIndex = xIndexByTs.get(markerTs);
+              if (tsIndex == null) {
                 return null;
               }
               return {
-                coord: [tsIndex, mapsBySymbolNet[symbol].get(marker.ts)],
-                ts: marker.ts,
+                coord: [tsIndex, mapsBySymbolNet[symbol].get(markerTs)],
+                ts: markerTs,
                 slug: marker.marketSlug,
                 drawdown: marker.delta,
               };
@@ -488,7 +555,15 @@ export default function PnlCharts({ totalSeries, totalSeriesNoFee, symbolSeries,
       },
       series,
     };
-  }, [symbolSeries, symbolSeriesNoFee, showNet, showNoFee, showDrawdownMarks, drawdownMarkers]);
+  }, [
+    aggregatedSymbolSeries,
+    aggregatedSymbolSeriesNoFee,
+    aggregation,
+    showNet,
+    showNoFee,
+    showDrawdownMarks,
+    drawdownMarkers,
+  ]);
 
   return (
     <Card
@@ -499,6 +574,16 @@ export default function PnlCharts({ totalSeries, totalSeriesNoFee, symbolSeries,
           <Button size="small" type={showDrawdownMarks ? "primary" : "default"} onClick={() => setShowDrawdownMarks((v) => !v)}>
             {showDrawdownMarks ? "Hide Drawdown Slug" : "Show Drawdown Slug"}
           </Button>
+          <Segmented
+            value={aggregation}
+            onChange={setAggregation}
+            options={[
+              { label: "Raw", value: "raw" },
+              { label: "15m", value: "15m" },
+              { label: "1h", value: "1h" },
+              { label: "1d", value: "1d" },
+            ]}
+          />
           <Segmented
             value={viewMode}
             onChange={setViewMode}
