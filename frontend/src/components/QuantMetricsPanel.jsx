@@ -62,6 +62,26 @@ function quantMetrics(totalSeries, totalSeriesNoFee, markets) {
     0,
   );
 
+  const entryAmounts = (markets || [])
+    .map((market) =>
+      (market.tokens || []).reduce((sum, token) => sum + Number(token.entry_amount_usdc || 0), 0),
+    )
+    .filter((value) => value > EPS);
+  const avgEntryAmount = mean(entryAmounts);
+
+  const positiveMarkets = (markets || [])
+    .map((market) => Number(market.realized_pnl_usdc || 0))
+    .filter((value) => value > EPS)
+    .sort((a, b) => b - a);
+  const grossPositivePnl = positiveMarkets.reduce((acc, value) => acc + value, 0);
+  const topProfitShare = (topN) => {
+    if (grossPositivePnl <= EPS) {
+      return null;
+    }
+    const topSum = positiveMarkets.slice(0, topN).reduce((acc, value) => acc + value, 0);
+    return topSum / grossPositivePnl;
+  };
+
   const winRate = nonZero.length ? wins.length / nonZero.length : 0;
   const recovery = maxDrawdown > EPS ? finalPnl / maxDrawdown : null;
 
@@ -76,6 +96,11 @@ function quantMetrics(totalSeries, totalSeriesNoFee, markets) {
     vol,
     recovery,
     totalTrades,
+    avgEntryAmount,
+    grossPositivePnl,
+    top1ProfitShare: topProfitShare(1),
+    top3ProfitShare: topProfitShare(3),
+    top5ProfitShare: topProfitShare(5),
     deltas,
     deltaVals,
     drawdownSeries,
@@ -258,6 +283,21 @@ export default function QuantMetricsPanel({ totalSeries, totalSeriesNoFee, marke
         </Col>
         <Col xs={12} md={8} lg={4}>
           <div className="metric-kpi"><Statistic title="Step Sharpe" value={fmtStat(metrics.sharpe)} /></div>
+        </Col>
+        <Col xs={12} md={8} lg={4}>
+          <div className="metric-kpi"><Statistic title="Avg Entry Amt" value={fmtStat(metrics.avgEntryAmount, "usd")} /></div>
+        </Col>
+        <Col xs={12} md={8} lg={4}>
+          <div className="metric-kpi"><Statistic title="Top 1 Profit Share" value={fmtStat(metrics.top1ProfitShare, "pct")} /></div>
+        </Col>
+        <Col xs={12} md={8} lg={4}>
+          <div className="metric-kpi"><Statistic title="Top 3 Profit Share" value={fmtStat(metrics.top3ProfitShare, "pct")} /></div>
+        </Col>
+        <Col xs={12} md={8} lg={4}>
+          <div className="metric-kpi"><Statistic title="Top 5 Profit Share" value={fmtStat(metrics.top5ProfitShare, "pct")} /></div>
+        </Col>
+        <Col xs={12} md={8} lg={4}>
+          <div className="metric-kpi"><Statistic title="Gross Profit" value={fmtStat(metrics.grossPositivePnl, "usd")} /></div>
         </Col>
       </Row>
 

@@ -79,6 +79,114 @@ def test_profit_engine_taker_buy_sell_and_redeem_warning():
     assert up.avg_entry_price > 0.5
 
 
+def test_redeem_uses_actual_position_when_market_has_fees():
+    market = PolymarketMarket(
+        slug="btc-updown-15m-1776787200",
+        condition_id="cond_redeem_fee",
+        up_token_id="up_token",
+        down_token_id="down_token",
+        outcomes=["Up", "Down"],
+        outcome_prices=[1, 0],
+        fee_schedule={"rate": 0.072, "takerOnly": True, "rebateRate": 0.2},
+    )
+
+    taker_buy = TradeRecord.model_validate(
+        {
+            "transactionHash": "0xfee_buy",
+            "timestamp": 1776787201,
+            "side": "BUY",
+            "asset": "up_token",
+            "conditionId": "cond_redeem_fee",
+            "size": 10,
+            "price": 0.5,
+        }
+    )
+    redeem = ActivityRecord.model_validate(
+        {
+            "transactionHash": "0xfee_redeem",
+            "timestamp": 1776789224,
+            "type": "REDEEM",
+            "conditionId": "cond_redeem_fee",
+            "size": 10,
+            "usdcSize": 10,
+        }
+    )
+
+    engine = ProfitEngine(fee_rate_bps=1000, missing_cost_warn_qty=0.5)
+    report, _, warnings = engine.process_market(
+        market=market,
+        taker_trades=[taker_buy],
+        all_trades=[taker_buy],
+        split_activities=[],
+        redeem_activities=[redeem],
+    )
+    no_fee_engine = ProfitEngine(fee_rate_bps=1000, missing_cost_warn_qty=0.5, charge_taker_fee=False)
+    no_fee_report, _, no_fee_warnings = no_fee_engine.process_market(
+        market=market,
+        taker_trades=[taker_buy],
+        all_trades=[taker_buy],
+        split_activities=[],
+        redeem_activities=[redeem],
+    )
+
+    up = next(t for t in report.tokens if t.token_id == "up_token")
+    no_fee_up = next(t for t in no_fee_report.tokens if t.token_id == "up_token")
+    assert up.redeem_qty == 9.64
+    assert up.realized_pnl_usdc == 4.64
+    assert no_fee_up.redeem_qty == 10
+    assert no_fee_up.realized_pnl_usdc == 5
+    assert warnings == []
+    assert no_fee_warnings == []
+
+
+def test_redeem_uses_reported_size_when_market_has_no_fees():
+    market = PolymarketMarket(
+        slug="btc-updown-15m-1776787200",
+        condition_id="cond_redeem_no_fee",
+        up_token_id="up_token",
+        down_token_id="down_token",
+        outcomes=["Up", "Down"],
+        outcome_prices=[1, 0],
+        fees_enabled=False,
+    )
+
+    buy = TradeRecord.model_validate(
+        {
+            "transactionHash": "0xno_fee_buy",
+            "timestamp": 1776787201,
+            "side": "BUY",
+            "asset": "up_token",
+            "conditionId": "cond_redeem_no_fee",
+            "size": 10,
+            "price": 0.5,
+        }
+    )
+    redeem = ActivityRecord.model_validate(
+        {
+            "transactionHash": "0xno_fee_redeem",
+            "timestamp": 1776789224,
+            "type": "REDEEM",
+            "conditionId": "cond_redeem_no_fee",
+            "size": 12,
+            "usdcSize": 12,
+        }
+    )
+
+    engine = ProfitEngine(fee_rate_bps=1000, missing_cost_warn_qty=0.5)
+    report, _, warnings = engine.process_market(
+        market=market,
+        taker_trades=[buy],
+        all_trades=[buy],
+        split_activities=[],
+        redeem_activities=[redeem],
+    )
+
+    up = next(t for t in report.tokens if t.token_id == "up_token")
+    assert up.redeem_qty == 12
+    assert up.realized_pnl_usdc == 7
+    assert any(w.code == "REDEEM_OVERSELL_ZERO_COST" for w in warnings)
+
+
 def test_fee_before_hard_coded_window_is_zero_even_with_fee_schedule():
     market = PolymarketMarket(
         slug="btc-updown-5m-1767661199",

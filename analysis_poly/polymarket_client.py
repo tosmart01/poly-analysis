@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
 
+from .activity_page_cache import UserActivityPageCache
 from .models import ActivityRecord, PolymarketMarket, TradeRecord
 
 
@@ -15,6 +17,7 @@ class PolymarketApiClient:
         self._gamma_base = "https://gamma-api.polymarket.com"
         self._data_base = "https://data-api.polymarket.com"
         self._client = httpx.AsyncClient(timeout=timeout_sec)
+        self._activity_page_cache = UserActivityPageCache()
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -136,6 +139,21 @@ class PolymarketApiClient:
         offset: int = 0,
         sort_direction: str = "ASC",
     ) -> list[ActivityRecord]:
+        now_ts = int(datetime.now(timezone.utc).timestamp())
+        use_cache = self._activity_page_cache.is_cache_eligible(end_ts=end_ts, now_ts=now_ts)
+        if use_cache:
+            cached = self._activity_page_cache.load(
+                user=user,
+                activity_types=activity_types,
+                start_ts=start_ts,
+                end_ts=end_ts,
+                limit=limit,
+                offset=offset,
+                sort_direction=sort_direction,
+            )
+            if cached is not None:
+                return cached
+
         params: dict[str, Any] = {
             "user": user,
             "sortBy": "TIMESTAMP",
@@ -153,7 +171,19 @@ class PolymarketApiClient:
         data = await self._request_json("GET", f"{self._data_base}/activity", params=params)
         if not data:
             return []
-        return [ActivityRecord.model_validate(item) for item in data]
+        records = [ActivityRecord.model_validate(item) for item in data]
+        if use_cache:
+            self._activity_page_cache.save(
+                user=user,
+                activity_types=activity_types,
+                start_ts=start_ts,
+                end_ts=end_ts,
+                limit=limit,
+                offset=offset,
+                sort_direction=sort_direction,
+                records=records,
+            )
+        return records
 
 
 

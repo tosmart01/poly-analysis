@@ -184,15 +184,21 @@ class ProfitEngine:
                 down_state.split_qty += qty_each
             elif event.kind == "REDEEM" and event.token_id in token_states:
                 token_state = token_states[event.token_id]
+                quantity = event.size
+                proceeds = event.usdc_size
+                if _market_has_effective_fees(market):
+                    quantity = token_state.position_qty
+                    if event.size > 1e-12:
+                        proceeds = event.usdc_size * (quantity / event.size)
                 delta, new_warnings = self._close_position(
                     market_slug=market.slug,
                     token_state=token_state,
                     timestamp=event.timestamp,
-                    quantity=event.size,
-                    proceeds=event.usdc_size,
+                    quantity=quantity,
+                    proceeds=proceeds,
                     missing_cost_warn_code="REDEEM_OVERSELL_ZERO_COST",
                 )
-                token_state.redeem_qty += event.size
+                token_state.redeem_qty += quantity
                 pnl_deltas.extend(delta)
                 warnings.extend(new_warnings)
 
@@ -469,6 +475,20 @@ def _market_fee_schedule(market: PolymarketMarket) -> Mapping[str, Any] | None:
     if market.fee_schedule is None:
         return None
     return market.fee_schedule.model_dump()
+
+
+def _market_has_effective_fees(market: PolymarketMarket) -> bool:
+    market_ts = _market_ts_from_slug(market.slug) or 0
+    if (
+        _HARD_CODED_FEE_START_TS <= market_ts < _HARD_CODED_FEE_END_TS
+        and _has_hard_coded_fee_slug(market.slug)
+    ):
+        return True
+
+    fee_schedule = _market_fee_schedule(market)
+    if fee_schedule is None:
+        return False
+    return float(fee_schedule.get("rate") or 0.0) > 0
 
 
 

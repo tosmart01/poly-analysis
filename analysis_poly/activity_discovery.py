@@ -8,7 +8,7 @@ from .models import WarningItem
 DISCOVERY_ACTIVITY_TYPES = ("TRADE", "SPLIT", "REDEEM")
 DISCOVERY_ACTIVITY_PAGE_LIMIT_MAX = 500
 DISCOVERY_ACTIVITY_OFFSET_MAX = 10000
-SECONDS_PER_DAY = 24 * 60 * 60
+DISCOVERY_ACTIVITY_WINDOW_SEC = 2 * 60 * 60
 
 
 @dataclass
@@ -233,9 +233,8 @@ def iter_day_windows(start_ts: int, end_ts: int) -> list[tuple[int, int]]:
     windows: list[tuple[int, int]] = []
     current = start_ts
     while current <= end_ts:
-        day_start = (current // SECONDS_PER_DAY) * SECONDS_PER_DAY
-        day_end = day_start + SECONDS_PER_DAY - 1
-        window_end = min(day_end, end_ts)
+        window_start = (current // DISCOVERY_ACTIVITY_WINDOW_SEC) * DISCOVERY_ACTIVITY_WINDOW_SEC
+        window_end = min(window_start + DISCOVERY_ACTIVITY_WINDOW_SEC - 1, end_ts)
         windows.append((current, window_end))
         current = window_end + 1
     return windows

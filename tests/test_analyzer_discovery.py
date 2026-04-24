@@ -1,6 +1,6 @@
 import asyncio
 
-from analysis_poly.activity_discovery import summarize_discovered_markets
+from analysis_poly.activity_discovery import iter_day_windows, summarize_discovered_markets
 from analysis_poly.analyzer import PolymarketProfitAnalyzer
 from analysis_poly.models import ActivityRecord, AnalysisRequest, MarketReport, PolymarketMarket, TokenReport
 from analysis_poly.profit_engine import PnlDelta
@@ -24,7 +24,7 @@ def test_run_discovers_daily_markets_and_filters_keywords(monkeypatch):
             activity_key = tuple(activity_types or [])
             self.calls.append((activity_key, start_ts, end_ts, offset))
             pages = {
-                (("TRADE", "SPLIT", "REDEEM"), 10, 86399): {
+                (("TRADE", "SPLIT", "REDEEM"), 10, 7199): {
                     0: [
                         ActivityRecord.model_validate(
                             {
@@ -110,17 +110,29 @@ def test_run_discovers_daily_markets_and_filters_keywords(monkeypatch):
             )
         )
 
+        expected_trade_windows = iter_day_windows(10, 86420)
+        expected_calls = [
+            (("TRADE", "SPLIT", "REDEEM"), start, end, 0)
+            for start, end in expected_trade_windows
+        ] + [
+            (("MAKER_REBATE",), start, end, 0)
+            for start, end in expected_trade_windows
+        ]
         assert fake_client.calls == [
-            (("TRADE", "SPLIT", "REDEEM"), 10, 86399, 0),
-            (("TRADE", "SPLIT", "REDEEM"), 86400, 86420, 0),
-            (("MAKER_REBATE",), 10, 86399, 0),
-            (("MAKER_REBATE",), 86400, 86420, 0),
+            *expected_calls,
         ]
         assert report.summary.markets_total == 1
         assert report.summary.markets_processed == 1
         assert [market.market_slug for market in report.markets] == ["eth-updown-15m-86400"]
 
     asyncio.run(runner())
+
+
+def test_iter_day_windows_uses_two_hour_windows():
+    assert iter_day_windows(10, 7220) == [
+        (10, 7199),
+        (7200, 7220),
+    ]
 
 
 def test_run_filters_discovered_markets_by_slug_timestamp(monkeypatch):
