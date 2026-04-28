@@ -6,7 +6,7 @@ import { sessionTitle, sessionTone } from "../utils/status";
 function StatusIcon({ runStatus }) {
   if (runStatus === "FAILED") return <CloseCircleFilled />;
   if (runStatus === "COMPLETED") return <CheckCircleFilled />;
-  return <ClockCircleFilled spin={runStatus === "RUNNING" || runStatus === "PENDING"} />;
+  return <ClockCircleFilled spin={["PENDING", "RUNNING", "FINALIZING", "STOPPING"].includes(runStatus)} />;
 }
 
 export default function StatusCard({ runStatus, latestWarning, summary, roi, winRate, progressPercent }) {

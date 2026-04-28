@@ -6,6 +6,8 @@ export function sessionTitle(runStatus) {
       return "Session Completed";
     case "STOPPED":
       return "Session Stopped";
+    case "FINALIZING":
+      return "Session Finalizing";
     case "STOPPING":
       return "Session Stopping";
     case "RUNNING":

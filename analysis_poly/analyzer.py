@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import json
+import time
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,9 +15,9 @@ from loguru import logger
 from .activity_discovery import (
     DISCOVERY_ACTIVITY_PAGE_LIMIT_MAX,
     DiscoveredMarket,
-    collect_user_activity,
+    collect_user_activity_for_windows,
     discover_user_markets_by_day,
-    iter_day_windows,
+    iter_week_windows,
 )
 from .market_cache import MarketMetadataCache
 from .market_result_cache import AddressMarketResultCache
@@ -51,6 +52,8 @@ class _MarketProcessResult:
 class AnalyzerHooks(Protocol):
     async def on_run_started(self, total_markets: int) -> None: ...
 
+    async def on_phase(self, status: str, message: str) -> None: ...
+
     async def on_progress(self, current: int, total: int, market_slug: str) -> None: ...
 
     async def on_warning(self, warning: WarningItem) -> None: ...
@@ -70,6 +73,9 @@ class AnalyzerHooks(Protocol):
 
 class NullHooks:
     async def on_run_started(self, total_markets: int) -> None:
+        return
+
+    async def on_phase(self, status: str, message: str) -> None:
         return
 
     async def on_progress(self, current: int, total: int, market_slug: str) -> None:
@@ -137,6 +143,8 @@ class PolymarketProfitAnalyzer:
         result_cache_dirty = False
 
         try:
+            run_started = time.perf_counter()
+            discovery_started = time.perf_counter()
             discovered_markets = await discover_user_markets_by_day(
                 client=client,
                 address=req.address,
@@ -145,11 +153,24 @@ class PolymarketProfitAnalyzer:
                 page_limit=req.page_limit,
                 warnings=all_warnings,
             )
+            logger.info(
+                "analyzer discovery complete address={} raw_market_count={} elapsed_sec={:.3f}",
+                req.address,
+                len(discovered_markets),
+                time.perf_counter() - discovery_started,
+            )
+            filter_started = time.perf_counter()
             discovered_markets = _filter_discovered_markets(
                 discovered_markets,
                 start_ts=req.start_ts,
                 end_ts=req.end_ts,
                 keywords=req.keywords,
+            )
+            logger.info(
+                "analyzer filter complete address={} filtered_market_count={} elapsed_sec={:.3f}",
+                req.address,
+                len(discovered_markets),
+                time.perf_counter() - filter_started,
             )
             total_markets = len(discovered_markets)
             logger.info(
@@ -168,6 +189,7 @@ class PolymarketProfitAnalyzer:
             if stop_event.is_set():
                 discovered_markets = []
 
+            metadata_started = time.perf_counter()
             slug_to_market = {
                 slug: market
                 for slug, market in await self._fetch_markets_with_status(
@@ -177,7 +199,15 @@ class PolymarketProfitAnalyzer:
                 )
                 if market is not None
             }
+            logger.info(
+                "analyzer metadata fetch complete address={} requested={} found={} elapsed_sec={:.3f}",
+                req.address,
+                len(discovered_markets),
+                len(slug_to_market),
+                time.perf_counter() - metadata_started,
+            )
 
+            market_processing_started = time.perf_counter()
             for batch_start in range(0, len(discovered_markets), process_concurrency):
                 if stop_event.is_set():
                     break
@@ -288,6 +318,18 @@ class PolymarketProfitAnalyzer:
 
                     await hooks.on_progress(processed_count, total_markets, result.market_slug)
 
+            logger.info(
+                "analyzer market processing complete address={} processed_refs={} output_markets={} total_deltas={} total_deltas_no_fee={} elapsed_sec={:.3f}",
+                req.address,
+                processed_count,
+                len(market_reports),
+                len(total_deltas),
+                len(total_deltas_no_fee),
+                time.perf_counter() - market_processing_started,
+            )
+
+            await hooks.on_phase("FINALIZING", "Collecting maker rebates")
+            maker_rebate_started = time.perf_counter()
             maker_rebate_records, maker_rebate_deltas = await self._collect_maker_rebate_deltas(
                 client=client,
                 address=req.address,
@@ -295,6 +337,13 @@ class PolymarketProfitAnalyzer:
                 end_ts=req.end_ts,
                 page_limit=req.page_limit,
                 warnings=all_warnings,
+            )
+            logger.info(
+                "analyzer maker rebate collect complete address={} records={} deltas={} elapsed_sec={:.3f}",
+                req.address,
+                len(maker_rebate_records),
+                len(maker_rebate_deltas),
+                time.perf_counter() - maker_rebate_started,
             )
             for delta in maker_rebate_deltas:
                 total_deltas.append(delta)
@@ -316,6 +365,8 @@ class PolymarketProfitAnalyzer:
                     total_cumulative_no_fee,
                 )
 
+            await hooks.on_phase("FINALIZING", "Building result curves")
+            curve_started = time.perf_counter()
             total_curve = [
                 CurvePoint(
                     timestamp=ts,
@@ -371,6 +422,14 @@ class PolymarketProfitAnalyzer:
                 markets_total=total_markets,
                 markets_processed=len(market_reports),
             )
+            logger.info(
+                "analyzer curves and summary complete address={} total_curve_points={} market_curves={} total_curve_no_fee_points={} elapsed_sec={:.3f}",
+                req.address,
+                len(total_curve),
+                len(market_curves),
+                len(total_curve_no_fee),
+                time.perf_counter() - curve_started,
+            )
 
             report = AnalysisReport(
                 request=req,
@@ -385,6 +444,14 @@ class PolymarketProfitAnalyzer:
                 is_partial=stop_event.is_set() and len(market_reports) < total_markets,
             )
 
+            logger.info(
+                "analyzer run complete address={} markets_total={} markets_processed={} warnings={} elapsed_sec={:.3f}",
+                req.address,
+                total_markets,
+                len(market_reports),
+                len(all_warnings),
+                time.perf_counter() - run_started,
+            )
             return report
         finally:
             if result_cache_dirty:
@@ -407,34 +474,33 @@ class PolymarketProfitAnalyzer:
         deltas: list[PnlDelta] = []
         capped_page_limit = min(max(1, page_limit), DISCOVERY_ACTIVITY_PAGE_LIMIT_MAX)
 
-        for window_start, window_end in iter_day_windows(start_ts, end_ts):
-            day_records = await collect_user_activity(
-                client=client,
-                address=address,
-                start_ts=window_start,
-                end_ts=window_end,
-                page_limit=capped_page_limit,
-                warnings=warnings,
-                activity_types=("MAKER_REBATE",),
+        records = await collect_user_activity_for_windows(
+            client=client,
+            address=address,
+            windows=iter_week_windows(start_ts, end_ts),
+            page_limit=capped_page_limit,
+            warnings=warnings,
+            activity_types=("MAKER_REBATE",),
+            label="maker_rebate_1w",
+        )
+        for record in records:
+            rebate_value = float(record.usdc_size or record.size or 0.0)
+            if rebate_value == 0:
+                continue
+            records_out.append(
+                MakerRebateRecord(
+                    timestamp=int(record.timestamp),
+                    usdc_size=rebate_value,
+                )
             )
-            for record in day_records:
-                rebate_value = float(record.usdc_size or record.size or 0.0)
-                if rebate_value == 0:
-                    continue
-                records_out.append(
-                    MakerRebateRecord(
-                        timestamp=int(record.timestamp),
-                        usdc_size=rebate_value,
-                    )
+            deltas.append(
+                PnlDelta(
+                    timestamp=int(record.timestamp),
+                    market_slug="__maker_rebate__",
+                    token_id="",
+                    delta_pnl_usdc=rebate_value,
                 )
-                deltas.append(
-                    PnlDelta(
-                        timestamp=int(record.timestamp),
-                        market_slug="__maker_rebate__",
-                        token_id="",
-                        delta_pnl_usdc=rebate_value,
-                    )
-                )
+            )
 
         records_out.sort(key=lambda item: item.timestamp, reverse=True)
         return records_out, sorted(deltas, key=lambda item: item.timestamp)

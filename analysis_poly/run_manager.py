@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -47,10 +48,30 @@ class RunHooks(AnalyzerHooks):
     async def on_run_started(self, total_markets: int) -> None:
         ctx = self._manager._runs[self._run_id]
         ctx.state.progress_total = total_markets
+        ctx.state.message = "Processing markets"
         await self._manager._emit(
             self._run_id,
             "run_started",
-            {"run_id": self._run_id, "progress_total": total_markets},
+            {"run_id": self._run_id, "progress_total": total_markets, "message": ctx.state.message},
+        )
+
+    async def on_phase(self, status: str, message: str) -> None:
+        ctx = self._manager._runs[self._run_id]
+        try:
+            ctx.state.status = RunStatus(status)
+        except ValueError:
+            logger.warning("ignore unknown run phase status run_id={} status={}", self._run_id, status)
+        ctx.state.message = message
+        await self._manager._emit(
+            self._run_id,
+            "status",
+            {
+                "run_id": self._run_id,
+                "status": ctx.state.status,
+                "message": message,
+                "progress_current": ctx.state.progress_current,
+                "progress_total": ctx.state.progress_total,
+            },
         )
 
     async def on_progress(self, current: int, total: int, market_slug: str) -> None:
@@ -144,6 +165,7 @@ class RunManager:
                 if active and active.state.status in {
                     RunStatus.PENDING,
                     RunStatus.RUNNING,
+                    RunStatus.FINALIZING,
                     RunStatus.STOPPING,
                 }:
                     raise HTTPException(status_code=409, detail="another run is in progress")
@@ -186,7 +208,17 @@ class RunManager:
 
         if not ctx.result:
             raise HTTPException(status_code=202, detail="run not finished")
-        return _compact_analysis_report(ctx.result, self._to_public_artifact_paths(ctx.result.artifacts))
+        started = time.perf_counter()
+        payload = _compact_analysis_report(ctx.result, self._to_public_artifact_paths(ctx.result.artifacts))
+        logger.info(
+            "result compact complete run_id={} markets={} total_series={} symbol_series={} elapsed_sec={:.3f}",
+            run_id,
+            len(payload.get("markets", [])),
+            len(payload.get("total_series", [])),
+            len(payload.get("symbol_series", {})),
+            time.perf_counter() - started,
+        )
+        return payload
 
     async def get_state(self, run_id: str) -> RunState:
         ctx = self._runs.get(run_id)
@@ -224,12 +256,40 @@ class RunManager:
             output_dir.mkdir(parents=True, exist_ok=True)
             suffix = f"{run_id}_{'partial' if report.is_partial else 'final'}"
 
+            ctx.state.status = RunStatus.FINALIZING
+            ctx.state.message = "Saving report artifacts"
+            await self._emit(
+                run_id,
+                "status",
+                {
+                    "run_id": run_id,
+                    "status": ctx.state.status,
+                    "message": ctx.state.message,
+                    "progress_current": ctx.state.progress_current,
+                    "progress_total": ctx.state.progress_total,
+                },
+            )
+
+            save_started = time.perf_counter()
             json_path = self._analyzer.save_json(report, str(output_dir / f"pnl_summary_{suffix}.json"))
+            logger.info("artifact save complete run_id={} kind=json elapsed_sec={:.3f}", run_id, time.perf_counter() - save_started)
+            save_started = time.perf_counter()
             total_csv_path = self._analyzer.save_total_curve_csv(
                 report, str(output_dir / f"pnl_total_curve_{suffix}.csv")
             )
+            logger.info(
+                "artifact save complete run_id={} kind=total_curve_csv elapsed_sec={:.3f}",
+                run_id,
+                time.perf_counter() - save_started,
+            )
+            save_started = time.perf_counter()
             market_csv_path = self._analyzer.save_market_curve_csv(
                 report, str(output_dir / f"pnl_market_curve_{suffix}.csv")
+            )
+            logger.info(
+                "artifact save complete run_id={} kind=market_curve_csv elapsed_sec={:.3f}",
+                run_id,
+                time.perf_counter() - save_started,
             )
 
             report.artifacts = {
@@ -243,6 +303,7 @@ class RunManager:
 
             if report.is_partial:
                 ctx.state.status = RunStatus.STOPPED
+                ctx.state.message = "Stopped"
                 logger.warning("run stopped run_id={} (partial result saved)", run_id)
                 await self._emit(
                     run_id,
@@ -255,6 +316,7 @@ class RunManager:
                 )
             else:
                 ctx.state.status = RunStatus.COMPLETED
+                ctx.state.message = "Completed"
                 logger.info("run completed run_id={} markets_processed={}", run_id, report.summary.markets_processed)
                 await self._emit(
                     run_id,

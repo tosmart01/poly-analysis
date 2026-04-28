@@ -1,12 +1,18 @@
 import asyncio
 
-from analysis_poly.activity_discovery import iter_day_windows, summarize_discovered_markets
+from analysis_poly.activity_discovery import (
+    dedupe_activity_records,
+    iter_calendar_day_windows,
+    iter_day_windows,
+    iter_week_windows,
+    summarize_discovered_markets,
+)
 from analysis_poly.analyzer import PolymarketProfitAnalyzer
 from analysis_poly.models import ActivityRecord, AnalysisRequest, MarketReport, PolymarketMarket, TokenReport
 from analysis_poly.profit_engine import PnlDelta
 
 
-def test_run_discovers_daily_markets_and_filters_keywords(monkeypatch):
+def test_run_discovers_markets_in_range_and_filters_keywords(monkeypatch):
     class FakeClient:
         def __init__(self):
             self.calls = []
@@ -24,7 +30,7 @@ def test_run_discovers_daily_markets_and_filters_keywords(monkeypatch):
             activity_key = tuple(activity_types or [])
             self.calls.append((activity_key, start_ts, end_ts, offset))
             pages = {
-                (("TRADE", "SPLIT", "REDEEM"), 10, 7199): {
+                (("TRADE",), 10, 7199): {
                     0: [
                         ActivityRecord.model_validate(
                             {
@@ -34,10 +40,10 @@ def test_run_discovers_daily_markets_and_filters_keywords(monkeypatch):
                                 "conditionId": "cond_a",
                                 "slug": "btc-updown-5m-100",
                             }
-                        )
+                        ),
                     ]
                 },
-                (("TRADE", "SPLIT", "REDEEM"), 86400, 86420): {
+                (("TRADE",), 86400, 86420): {
                     0: [
                         ActivityRecord.model_validate(
                             {
@@ -47,11 +53,9 @@ def test_run_discovers_daily_markets_and_filters_keywords(monkeypatch):
                                 "conditionId": "cond_b",
                                 "slug": "eth-updown-15m-86400",
                             }
-                        )
+                        ),
                     ]
                 },
-                (("MAKER_REBATE",), 10, 86399): {0: []},
-                (("MAKER_REBATE",), 86400, 86420): {0: []},
             }
             return pages.get((activity_key, start_ts, end_ts), {}).get(offset, [])
 
@@ -110,17 +114,17 @@ def test_run_discovers_daily_markets_and_filters_keywords(monkeypatch):
             )
         )
 
-        expected_trade_windows = iter_day_windows(10, 86420)
         expected_calls = [
-            (("TRADE", "SPLIT", "REDEEM"), start, end, 0)
-            for start, end in expected_trade_windows
+            (("TRADE",), start, end, 0)
+            for start, end in iter_day_windows(10, 86420)
+        ] + [
+            (("SPLIT", "REDEEM"), start, end, 0)
+            for start, end in iter_calendar_day_windows(10, 86420)
         ] + [
             (("MAKER_REBATE",), start, end, 0)
-            for start, end in expected_trade_windows
+            for start, end in iter_week_windows(10, 86420)
         ]
-        assert fake_client.calls == [
-            *expected_calls,
-        ]
+        assert fake_client.calls == expected_calls
         assert report.summary.markets_total == 1
         assert report.summary.markets_processed == 1
         assert [market.market_slug for market in report.markets] == ["eth-updown-15m-86400"]
@@ -132,6 +136,12 @@ def test_iter_day_windows_uses_two_hour_windows():
     assert iter_day_windows(10, 7220) == [
         (10, 7199),
         (7200, 7220),
+    ]
+
+
+def test_iter_week_windows_groups_exact_week_in_one_window():
+    assert iter_week_windows(10, 10 + 7 * 24 * 60 * 60) == [
+        (10, 604810),
     ]
 
 
@@ -148,7 +158,7 @@ def test_run_filters_discovered_markets_by_slug_timestamp(monkeypatch):
             sort_direction="ASC",
         ):
             activity_key = tuple(activity_types or [])
-            if activity_key == ("TRADE", "SPLIT", "REDEEM"):
+            if activity_key == ("SPLIT", "REDEEM"):
                 return [
                     ActivityRecord.model_validate(
                         {
@@ -161,6 +171,9 @@ def test_run_filters_discovered_markets_by_slug_timestamp(monkeypatch):
                             "usdcSize": 1,
                         }
                     ),
+                ]
+            if activity_key == ("TRADE",):
+                return [
                     ActivityRecord.model_validate(
                         {
                             "transactionHash": "0xlive_trade",
@@ -221,7 +234,7 @@ def test_run_filters_discovered_markets_by_slug_timestamp(monkeypatch):
 
         report = await analyzer.run(
             AnalysisRequest(
-                address="0xb4ef1257f7ac40c26f4dfaaad69ed75f6458682f",
+                address="0xabc0000000000000000000000000000000000000",
                 start_ts=1774972800,
                 end_ts=1776679380,
                 keywords=[],
@@ -249,7 +262,7 @@ def test_run_adds_daily_maker_rebate_to_summary_and_total_curve(monkeypatch):
             sort_direction="ASC",
         ):
             activity_key = tuple(activity_types or [])
-            if activity_key == ("TRADE", "SPLIT", "REDEEM"):
+            if activity_key == ("TRADE",):
                 if start_ts == 10 and offset == 0:
                     return [
                         ActivityRecord.model_validate(
@@ -373,3 +386,34 @@ def test_discovery_ignores_zero_value_redeem_activity():
 
     assert [item.slug for item in discovered] == ["btc-updown-15m-1776432800"]
     assert warnings == []
+
+
+def test_dedupe_activity_records_ignores_float_field_differences():
+    records = [
+        ActivityRecord.model_validate(
+            {
+                "transactionHash": "0xsame",
+                "timestamp": 1776432800,
+                "type": "TRADE",
+                "conditionId": "cond_live",
+                "slug": "btc-updown-15m-1776432800",
+                "size": 1,
+                "usdcSize": 0.5,
+            }
+        ),
+        ActivityRecord.model_validate(
+            {
+                "transactionHash": "0xsame",
+                "timestamp": 1776432801,
+                "type": "TRADE",
+                "conditionId": "cond_live",
+                "slug": "btc-updown-15m-1776432800",
+                "size": 0.999999999,
+                "usdcSize": 0.500000001,
+            }
+        ),
+    ]
+
+    deduped = dedupe_activity_records(records)
+
+    assert len(deduped) == 1

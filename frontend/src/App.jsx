@@ -16,6 +16,7 @@ const MAX_DRAWDOWN_MARKERS = 8;
 const MIN_DRAWDOWN_DELTA_USDC = 0.5;
 const LIVE_CURVE_BUCKET_SEC = 15 * 60;
 const MAX_LIVE_CURVE_POINT_EVENTS = 12000;
+const ACTIVE_RUN_STATUSES = new Set(["PENDING", "RUNNING", "FINALIZING", "STOPPING"]);
 
 function extractMarketPrefix(marketSlug) {
   const raw = String(marketSlug || "").trim().toLowerCase();
@@ -158,6 +159,7 @@ export default function App({ serverDefaults }) {
   const [runId, setRunId] = useState(null);
   const [runStatus, setRunStatus] = useState("IDLE");
   const [running, setRunning] = useState(false);
+  const [statusMessage, setStatusMessage] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const [progress, setProgress] = useState({ current: 0, total: 0 });
@@ -239,8 +241,15 @@ export default function App({ serverDefaults }) {
     return (winCount / markets.length) * 100;
   }, [markets]);
 
-  const progressPercent = progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0;
+  const rawProgressPercent = progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0;
+  const progressPercent =
+    runStatus === "COMPLETED"
+      ? 100
+      : ACTIVE_RUN_STATUSES.has(runStatus)
+        ? Math.min(rawProgressPercent, 99)
+        : rawProgressPercent;
   const latestWarning = warnings[0] || IDLE_WARNING;
+  const statusText = statusMessage || latestWarning;
 
   function updateField(key, value) {
     setFormData((prev) => ({ ...prev, [key]: value }));
@@ -288,6 +297,7 @@ export default function App({ serverDefaults }) {
   function clearRunData() {
     clearCurves();
     setProgress({ current: 0, total: 0 });
+    setStatusMessage("");
     setSummary(EMPTY_SUMMARY);
     setMarkets([]);
     setMakerRebates([]);
@@ -499,7 +509,24 @@ export default function App({ serverDefaults }) {
     stream.addEventListener("run_started", (event) => {
       const data = JSON.parse(event.data || "{}");
       setRunStatus("RUNNING");
+      setStatusMessage(data.message || "Processing markets");
       setProgress({ current: 0, total: Number(data.progress_total || 0) });
+    });
+
+    stream.addEventListener("status", (event) => {
+      const data = JSON.parse(event.data || "{}");
+      if (data.status) {
+        setRunStatus(data.status);
+      }
+      if (data.message) {
+        setStatusMessage(data.message);
+      }
+      if (data.progress_current !== undefined && data.progress_total !== undefined) {
+        setProgress({
+          current: Number(data.progress_current),
+          total: Number(data.progress_total),
+        });
+      }
     });
 
     stream.addEventListener("progress", (event) => {
@@ -549,6 +576,7 @@ export default function App({ serverDefaults }) {
     stream.addEventListener("completed", async () => {
       setRunStatus("COMPLETED");
       setRunning(false);
+      setStatusMessage("");
       await loadResult(currentRunId);
       closeStream();
     });
@@ -556,6 +584,7 @@ export default function App({ serverDefaults }) {
     stream.addEventListener("stopped", async () => {
       setRunStatus("STOPPED");
       setRunning(false);
+      setStatusMessage("");
       await loadResult(currentRunId);
       closeStream();
     });
@@ -563,6 +592,7 @@ export default function App({ serverDefaults }) {
     stream.addEventListener("run_error", (event) => {
       setRunStatus("FAILED");
       setRunning(false);
+      setStatusMessage("");
 
       try {
         const data = JSON.parse(event.data || "{}");
@@ -613,10 +643,12 @@ export default function App({ serverDefaults }) {
 
       setRunId(created.run_id);
       setRunStatus("PENDING");
+      setStatusMessage("Starting analysis");
       setRunning(true);
       attachStream(created.run_id);
     } catch (error) {
       setRunStatus("FAILED");
+      setStatusMessage("");
       pushWarning(`start failed: ${error.message || String(error)}`);
       message.error("Start failed");
     }
@@ -629,6 +661,7 @@ export default function App({ serverDefaults }) {
     try {
       await stopRun(runId);
       setRunStatus("STOPPING");
+      setStatusMessage("Stopping requested");
     } catch (error) {
       pushWarning(`stop failed: ${error.message || String(error)}`);
     }
@@ -647,6 +680,7 @@ export default function App({ serverDefaults }) {
     setRunId(null);
     setRunStatus("IDLE");
     setRunning(false);
+    setStatusMessage("");
     clearRunData();
   }
 
@@ -655,7 +689,7 @@ export default function App({ serverDefaults }) {
       <div className="container">
         <StatusCard
           runStatus={runStatus}
-          latestWarning={latestWarning}
+          latestWarning={statusText}
           summary={summary}
           roi={roi}
           winRate={winRate}

@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-04-28
+
+### Fixes
+- Reuse activity range cache for stale portions of windowed requests even when the requested end time is inside the recent protection window.
+- Prevent recent short-range requests from forcing a later long-range request to refetch every activity window.
+
+### Diagnostics
+- Always log window-group cache checks with cached record count and missing segment counts.
+
 ## 2026-03-20
 
 ### Fixes

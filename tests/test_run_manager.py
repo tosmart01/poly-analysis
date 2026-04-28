@@ -80,6 +80,55 @@ def test_stop_run_updates_status(monkeypatch):
     asyncio.run(runner())
 
 
+def test_finalizing_state_is_observable_and_blocks_new_runs(monkeypatch):
+    async def runner():
+        manager = RunManager()
+        finalizing_seen = asyncio.Event()
+        finish = asyncio.Event()
+
+        async def fake_run(req, stop_event=None, hooks=None):
+            await hooks.on_run_started(1)
+            await hooks.on_progress(1, 1, "btc-updown-15m-1000")
+            await hooks.on_phase("FINALIZING", "Collecting maker rebates")
+            finalizing_seen.set()
+            await finish.wait()
+            return AnalysisReport(
+                request=req,
+                summary=SummaryStats(markets_total=1, markets_processed=1),
+                markets=[],
+                total_curve=[],
+                market_curves={},
+                warnings=[],
+                is_partial=False,
+            )
+
+        monkeypatch.setattr(manager._analyzer, "run", fake_run)
+
+        req = AnalysisRequest(
+            address="0xe00740bce98a594e26861838885ab310ec3b548c",
+            start_ts=100,
+            end_ts=200,
+        )
+
+        created = await manager.create_run(req)
+        await asyncio.wait_for(finalizing_seen.wait(), timeout=1)
+
+        state = await manager.get_state(created.run_id)
+        assert state.status == RunStatus.FINALIZING
+        assert state.progress_current == 1
+        assert state.progress_total == 1
+        assert state.message == "Collecting maker rebates"
+
+        with pytest.raises(HTTPException) as exc:
+            await manager.create_run(req)
+        assert exc.value.status_code == 409
+
+        finish.set()
+        await manager._runs[created.run_id].task
+
+    asyncio.run(runner())
+
+
 def test_get_result_returns_compact_payload():
     async def runner():
         manager = RunManager()

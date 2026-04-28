@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 class RunStatus(str, Enum):
     PENDING = "PENDING"
     RUNNING = "RUNNING"
+    FINALIZING = "FINALIZING"
     STOPPING = "STOPPING"
     COMPLETED = "COMPLETED"
     STOPPED = "STOPPED"
