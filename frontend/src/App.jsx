@@ -255,6 +255,18 @@ export default function App({ serverDefaults }) {
     setFormData((prev) => ({ ...prev, [key]: value }));
   }
 
+  function applyQuickRange(days) {
+    const end = new Date();
+    end.setSeconds(0, 0);
+    const start = new Date(end);
+    start.setDate(start.getDate() - days);
+    setFormData((prev) => ({
+      ...prev,
+      startTime: toDateTimeText(start),
+      endTime: toDateTimeText(end),
+    }));
+  }
+
   function pushWarning(text) {
     if (!text) {
       return;
@@ -699,6 +711,7 @@ export default function App({ serverDefaults }) {
         <ConfigPanel
           formData={formData}
           updateField={updateField}
+          onQuickRange={applyQuickRange}
           downloads={downloads}
           onOpenAdvanced={() => setAdvancedOpen(true)}
           onToggleRun={handleToggleRun}

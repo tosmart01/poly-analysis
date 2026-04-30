@@ -1,16 +1,46 @@
 from analysis_poly.models import ActivityRecord, PolymarketMarket, TradeRecord
-from analysis_poly.profit_engine import ProfitEngine, _fee_adjust
+from analysis_poly.profit_engine import ProfitEngine, _fee_adjust, _fee_adjust_for_trade
 
 
 def test_fee_adjust_basic():
     adjusted, fee_token, fee_usdc = _fee_adjust(100.0, 0.5, "BUY", {"rate": 0.072})
-    assert adjusted == 96.4
-    assert fee_token == 3.6
+    assert adjusted == 100.0
+    assert fee_token == 0.0
     assert fee_usdc == 1.8
 
 
 def test_fee_adjust_sell_keeps_size_and_charges_usdc_fee():
     adjusted, fee_token, fee_usdc = _fee_adjust(100.0, 0.5, "SELL", {"rate": 0.072})
+    assert adjusted == 100.0
+    assert fee_token == 0.0
+    assert fee_usdc == 1.8
+
+
+def test_fee_adjust_for_trade_uses_share_fee_before_usdc_buy_cutover():
+    adjusted, fee_token, fee_usdc = _fee_adjust_for_trade(
+        size=100.0,
+        price=0.5,
+        side="BUY",
+        timestamp=1777373999,
+        market_slug="non-updown-market-1777373999",
+        fee_schedule={"rate": 0.072},
+    )
+
+    assert adjusted == 96.4
+    assert fee_token == 3.6
+    assert fee_usdc == 1.8
+
+
+def test_fee_adjust_for_trade_uses_usdc_buy_fee_at_cutover():
+    adjusted, fee_token, fee_usdc = _fee_adjust_for_trade(
+        size=100.0,
+        price=0.5,
+        side="BUY",
+        timestamp=1777374000,
+        market_slug="non-updown-market-1777374000",
+        fee_schedule={"rate": 0.072},
+    )
+
     assert adjusted == 100.0
     assert fee_token == 0.0
     assert fee_usdc == 1.8
@@ -343,6 +373,45 @@ def test_fee_after_hard_coded_window_uses_fee_schedule_without_slug_filter():
 
     up = next(t for t in report.tokens if t.token_id == "up_token")
     assert up.buy_qty == 96.4
+    assert up.taker_fee_usdc == 1.8
+
+
+def test_fee_after_usdc_buy_cutover_keeps_buy_qty_and_adds_fee_to_cost():
+    market = PolymarketMarket(
+        slug="non-updown-market-1777374000",
+        condition_id="cond_fee_after_cutover",
+        up_token_id="up_token",
+        down_token_id="down_token",
+        outcomes=["Up", "Down"],
+        outcome_prices=[0.5, 0.5],
+        fee_schedule={"rate": 0.072, "takerOnly": True, "rebateRate": 0.2},
+    )
+
+    taker_buy = TradeRecord.model_validate(
+        {
+            "transactionHash": "0xafter_cutover",
+            "timestamp": 1777374000,
+            "side": "BUY",
+            "asset": "up_token",
+            "conditionId": "cond_fee_after_cutover",
+            "size": 100,
+            "price": 0.5,
+        }
+    )
+
+    engine = ProfitEngine(fee_rate_bps=1000, missing_cost_warn_qty=0.5)
+    report, _, _ = engine.process_market(
+        market=market,
+        taker_trades=[taker_buy],
+        all_trades=[taker_buy],
+        split_activities=[],
+        redeem_activities=[],
+    )
+
+    up = next(t for t in report.tokens if t.token_id == "up_token")
+    assert up.buy_qty == 100
+    assert up.entry_amount_usdc == 51.8
+    assert up.avg_entry_price == 0.518
     assert up.taker_fee_usdc == 1.8
 
 

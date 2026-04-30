@@ -198,6 +198,23 @@ body {
   text-align: center;
 }
 
+.quick-range-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.quick-range-row .ant-btn {
+  border-radius: 999px;
+  border-color: #cfd8e7;
+  background: #f7f9fd;
+  color: #41506a;
+  font-weight: 700;
+  min-width: 62px;
+}
+
 .action-row {
   display: flex;
   align-items: center;

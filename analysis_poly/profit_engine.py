@@ -18,6 +18,7 @@ _HARD_CODED_FEE_START_TS = 1767661200  # 2026-01-06 09:00:00 Asia/Shanghai
 _HARD_CODED_FEE_END_TS = 1774832400  # 2026-03-30 09:00:00 Asia/Shanghai
 _HARD_CODED_FEE_RATE_BPS = 1000.0
 _HARD_CODED_FEE_SLUG_PARTS = ("updown-5m", "updown-15m")
+_USDC_BUY_FEE_START_TS = 1777374000  # 2026-04-28 19:00:00 Asia/Shanghai
 
 
 @dataclass
@@ -271,9 +272,12 @@ class ProfitEngine:
 
         if event.side == "BUY":
             qty_add = event.size
-            if event.is_taker and self._charge_taker_fee:
-                qty_add = adjusted_size
             total_cost = event.size * event.price
+            if event.is_taker and self._charge_taker_fee:
+                if _uses_usdc_buy_fee(event.timestamp):
+                    total_cost += fee_usdc
+                else:
+                    qty_add = adjusted_size
             if qty_add > 0:
                 token_state.lots.append(_Lot(qty=qty_add, cost_per_qty=total_cost / qty_add))
             token_state.buy_qty += qty_add
@@ -410,7 +414,12 @@ def _fee_adjust_for_trade(
 
     if timestamp < _HARD_CODED_FEE_END_TS:
         if _has_hard_coded_fee_slug(market_slug):
-            return _legacy_fee_adjust(size, price, _HARD_CODED_FEE_RATE_BPS)
+            return _legacy_fee_adjust(
+                size,
+                price,
+                _HARD_CODED_FEE_RATE_BPS,
+                buy_fee_in_usdc=_uses_usdc_buy_fee(timestamp),
+            )
         return size, 0.0, 0.0
 
     return _fee_adjust(
@@ -419,6 +428,7 @@ def _fee_adjust_for_trade(
         side=side,
         fee_schedule=fee_schedule,
         fallback_fee_rate_bps=fallback_fee_rate_bps,
+        buy_fee_in_usdc=_uses_usdc_buy_fee(timestamp),
     )
 
 
@@ -428,6 +438,7 @@ def _fee_adjust(
     side: str | None,
     fee_schedule: Mapping[str, Any] | None = None,
     fallback_fee_rate_bps: float = 0.0,
+    buy_fee_in_usdc: bool = True,
 ) -> tuple[float, float, float]:
     if size <= 0 or price <= 0:
         return size, 0.0, 0.0
@@ -441,20 +452,27 @@ def _fee_adjust(
             return size, 0.0, 0.0
 
         side_value = str(getattr(side, "value", side) or "").upper()
-        if side_value == "BUY":
+        if side_value == "BUY" and not buy_fee_in_usdc:
             fee_token = fee_usdc / price
             adjusted_size = max(size - fee_token, 0.0)
             return adjusted_size, fee_token, fee_usdc
 
         return size, 0.0, fee_usdc
 
-    return _legacy_fee_adjust(size, price, fallback_fee_rate_bps)
+    return _legacy_fee_adjust(size, price, fallback_fee_rate_bps, buy_fee_in_usdc=buy_fee_in_usdc)
 
 
-def _legacy_fee_adjust(size: float, price: float, fee_rate_bps: float) -> tuple[float, float, float]:
+def _legacy_fee_adjust(
+    size: float,
+    price: float,
+    fee_rate_bps: float,
+    buy_fee_in_usdc: bool = True,
+) -> tuple[float, float, float]:
     adjusted_size = _default_fee_calc(size, price, fee_rate_bps)
     fee_token = size - adjusted_size
     fee_usdc = fee_token * price
+    if buy_fee_in_usdc:
+        return size, 0.0, fee_usdc
     return adjusted_size, fee_token, fee_usdc
 
 
@@ -467,6 +485,10 @@ def _default_fee_calc(size: float, price: float, fee_rate_bps: float) -> float:
 def _has_hard_coded_fee_slug(market_slug: str) -> bool:
     slug = market_slug.lower()
     return any(part in slug for part in _HARD_CODED_FEE_SLUG_PARTS)
+
+
+def _uses_usdc_buy_fee(timestamp: int) -> bool:
+    return timestamp >= _USDC_BUY_FEE_START_TS
 
 
 def _market_fee_schedule(market: PolymarketMarket) -> Mapping[str, Any] | None:

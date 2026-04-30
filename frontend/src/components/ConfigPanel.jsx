@@ -4,6 +4,7 @@ import { DownloadOutlined } from "@ant-design/icons";
 export default function ConfigPanel({
   formData,
   updateField,
+  onQuickRange,
   downloads,
   onOpenAdvanced,
   onToggleRun,
@@ -83,6 +84,20 @@ export default function ConfigPanel({
                 <Input value={formData.startTime} onChange={(event) => updateField("startTime", event.target.value)} placeholder="YYYY-MM-DD HH:MM" />
                 <span className="time-separator">--</span>
                 <Input value={formData.endTime} onChange={(event) => updateField("endTime", event.target.value)} placeholder="YYYY-MM-DD HH:MM" />
+              </div>
+              <div className="quick-range-row">
+                <Button size="small" onClick={() => onQuickRange(3)}>
+                  Last 3D
+                </Button>
+                <Button size="small" onClick={() => onQuickRange(7)}>
+                  1W
+                </Button>
+                <Button size="small" onClick={() => onQuickRange(30)}>
+                  1M
+                </Button>
+                <Button size="small" onClick={() => onQuickRange(90)}>
+                  3M
+                </Button>
               </div>
             </Form.Item>
           </Col>
