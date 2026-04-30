@@ -4,6 +4,7 @@
 
 ![PnL](assets/pnl.png)
 ![Ratio](assets/ratio.png)
+![rebate](assets/rebate.png)
 
 中文说明见：[README_zh.md](README_zh.md)
 

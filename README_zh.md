@@ -4,6 +4,7 @@
 
 ![PnL](assets/pnl.png)
 ![Ratio](assets/ratio.png)
+![rebate](assets/rebate.png)
 
 Polymarket 市场 PnL 分析 Web 工具。
 
