@@ -2,7 +2,6 @@ import { Layout, message } from "antd";
 import { useEffect, useMemo, useRef, useState } from "react";
 import AdvancedModal from "./components/AdvancedModal";
 import ConfigPanel from "./components/ConfigPanel";
-import MakerRebateTable from "./components/MakerRebateTable";
 import MarketTable from "./components/MarketTable";
 import PnlCharts from "./components/PnlCharts";
 import QuantMetricsPanel from "./components/QuantMetricsPanel";
@@ -730,9 +729,7 @@ export default function App({ serverDefaults }) {
 
         <QuantMetricsPanel totalSeries={totalSeries} totalSeriesNoFee={totalSeriesNoFee} markets={markets} />
 
-        <MakerRebateTable makerRebates={makerRebates} />
-
-        <MarketTable markets={markets} />
+        <MarketTable markets={markets} makerRebates={makerRebates} />
       </div>
 
       <AdvancedModal open={advancedOpen} onClose={() => setAdvancedOpen(false)} formData={formData} updateField={updateField} />

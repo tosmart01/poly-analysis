@@ -105,7 +105,7 @@ def test_run_discovers_markets_in_range_and_filters_keywords(monkeypatch):
 
         report = await analyzer.run(
             AnalysisRequest(
-                address="0xe00740bce98a594e26861838885ab310ec3b548c",
+                address="0xabc",
                 start_ts=10,
                 end_ts=86420,
                 keywords=["15m"],
@@ -234,7 +234,7 @@ def test_run_filters_discovered_markets_by_slug_timestamp(monkeypatch):
 
         report = await analyzer.run(
             AnalysisRequest(
-                address="0xabc0000000000000000000000000000000000000",
+                address="0xabc",
                 start_ts=1774972800,
                 end_ts=1776679380,
                 keywords=[],
@@ -337,7 +337,7 @@ def test_run_adds_daily_maker_rebate_to_summary_and_total_curve(monkeypatch):
 
         report = await analyzer.run(
             AnalysisRequest(
-                address="0xe00740bce98a594e26861838885ab310ec3b548c",
+                address="0xabc",
                 start_ts=10,
                 end_ts=300,
                 keywords=["15m"],

@@ -5,21 +5,29 @@
 ![PnL](assets/pnl.png)
 ![Ratio](assets/ratio.png)
 
-Polymarket 真实利润分析 Web 工具。
+Polymarket 市场 PnL 分析 Web 工具。
 
 ## 适用范围（重要）
 
-- 本工具主要针对 Polymarket crypto `updown` 且含 taker 手续费的市场。
-- 主面板会先按所选时间范围查询用户 activity，再只回放命中的 slug。
-- **不**是一个覆盖所有 Polymarket 市场类型的通用 PnL 引擎。
-- 主要目的：量化并可视化手续费对真实盈利的影响（`Net PnL` 对比 `No-Fee PnL`）。
+- 主面板会先按所选时间范围查询用户 activity，再回放命中的市场。
+- 适用于 Polymarket 市场通用分析，不仅限于 crypto 市场。
+- 主要目的：量化并可视化真实 PnL、手续费影响、市场级表现，以及 `Net PnL` 对比 `No-Fee PnL`。
 
 ## 环境要求
 
 - Python `3.11+`（推荐使用 `3.11`）
-- `uv` 包管理器
+- `uv` 包管理器仅本地开发时需要
 
-## 作为独立包安装
+## 快速开始
+
+```bash
+pip install analysis-poly
+analysis-poly-server --host 127.0.0.1 --port 8000
+```
+
+打开 [http://localhost:8000](http://localhost:8000)。
+
+## 从源码本地安装
 
 ```bash
 uv pip install .
@@ -27,21 +35,18 @@ uv pip install .
 pip install .
 ```
 
-安装后可直接运行：
+随后使用同一条命令启动 Web 服务：
 
 ```bash
-analysis-poly
-analysis-poly-open --address 0xabc --keywords updown,15m
+analysis-poly-server --host 127.0.0.1 --port 8000
 ```
 
-## 启动
+如果是在源码目录中开发，也可以使用：
 
 ```bash
 uv sync
 uv run python main.py
 ```
-
-打开 [http://localhost:8000](http://localhost:8000)。
 
 ## 命令行打开并自动启动
 

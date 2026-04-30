@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "analysis-poly"
-version = "0.1.4"
-description = "Polymarket real-profit web analyzer"
+version = "0.1.5"
+description = "Polymarket market PnL web analyzer"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -19,6 +19,7 @@ dependencies = [
 
 [project.scripts]
 analysis-poly = "analysis_poly.cli:main"
+analysis-poly-server = "analysis_poly.cli:main"
 analysis-poly-open = "analysis_poly.open_with_params:main"
 
 [project.optional-dependencies]

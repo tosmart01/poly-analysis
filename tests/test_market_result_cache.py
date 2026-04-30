@@ -4,7 +4,7 @@ from analysis_poly.market_result_cache import AddressMarketResultCache
 def test_address_market_result_cache_roundtrip(tmp_path):
     cache = AddressMarketResultCache(cache_dir=tmp_path / "result_cache")
 
-    address = "0xe00740bce98a594e26861838885ab310ec3b548c"
+    address = "0xabc"
     markets = {
         "btc-updown-15m-1771983900": {
             "market_slug": "btc-updown-15m-1771983900",

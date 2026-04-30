@@ -28,9 +28,27 @@ createRoot(rootNode).render(
     <ConfigProvider
       theme={{
         token: {
-          colorPrimary: "#2f7df4",
-          borderRadius: 12,
+          colorPrimary: "#178f98",
+          borderRadius: 14,
+          colorBgContainer: "rgba(255,255,255,0.62)",
+          colorBorder: "rgba(111,126,151,0.22)",
+          colorText: "#182334",
+          colorTextSecondary: "#607089",
           fontFamily: "'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        },
+        components: {
+          Card: {
+            colorBgContainer: "rgba(255,255,255,0.54)",
+            headerBg: "transparent",
+          },
+          Table: {
+            headerBg: "rgba(255,255,255,0.48)",
+            rowHoverBg: "rgba(255,255,255,0.5)",
+          },
+          Modal: {
+            contentBg: "rgba(255,255,255,0.78)",
+            headerBg: "transparent",
+          },
         },
       }}
     >

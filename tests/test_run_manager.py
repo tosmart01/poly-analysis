@@ -35,7 +35,7 @@ def test_single_run_lock_conflict(monkeypatch):
         monkeypatch.setattr(manager._analyzer, "run", fake_run)
 
         req = AnalysisRequest(
-            address="0xe00740bce98a594e26861838885ab310ec3b548c",
+            address="0xabc",
             start_ts=100,
             end_ts=200,
         )
@@ -68,7 +68,7 @@ def test_stop_run_updates_status(monkeypatch):
         monkeypatch.setattr(manager._analyzer, "run", fake_run)
 
         req = AnalysisRequest(
-            address="0xe00740bce98a594e26861838885ab310ec3b548c",
+            address="0xabc",
             start_ts=100,
             end_ts=200,
         )
@@ -105,7 +105,7 @@ def test_finalizing_state_is_observable_and_blocks_new_runs(monkeypatch):
         monkeypatch.setattr(manager._analyzer, "run", fake_run)
 
         req = AnalysisRequest(
-            address="0xe00740bce98a594e26861838885ab310ec3b548c",
+            address="0xabc",
             start_ts=100,
             end_ts=200,
         )
@@ -133,7 +133,7 @@ def test_get_result_returns_compact_payload():
     async def runner():
         manager = RunManager()
         req = AnalysisRequest(
-            address="0xe00740bce98a594e26861838885ab310ec3b548c",
+            address="0xabc",
             start_ts=100,
             end_ts=200,
             keywords=["updown"],

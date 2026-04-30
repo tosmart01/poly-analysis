@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import { Card, Col, Divider, Row, Table } from "antd";
+import { useMemo, useState } from "react";
+import { Card, Col, Divider, Input, Row, Table } from "antd";
 import dayjs from "dayjs";
 import ReactECharts from "echarts-for-react";
 import { formatPct, formatUsd } from "../utils/format";
@@ -155,7 +155,38 @@ const columns = [
   },
 ];
 
-export default function MarketTable({ markets }) {
+const makerRebateColumns = [
+  {
+    title: "Payout Time",
+    dataIndex: "timestamp",
+    key: "timestamp",
+    width: 220,
+    render: (value) => dayjs(Number(value || 0) * 1000).format("YYYY-MM-DD HH:mm:ss"),
+    sorter: (a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0),
+    defaultSortOrder: "descend",
+  },
+  {
+    title: "Rebate",
+    dataIndex: "usdc_size",
+    key: "usdc_size",
+    width: 140,
+    render: (value) => formatUsd(value),
+    sorter: (a, b) => Number(a.usdc_size || 0) - Number(b.usdc_size || 0),
+  },
+];
+
+export default function MarketTable({ markets, makerRebates }) {
+  const [marketQuery, setMarketQuery] = useState("");
+  const [marketPage, setMarketPage] = useState(1);
+
+  const filteredMarkets = useMemo(() => {
+    const query = marketQuery.trim().toLowerCase();
+    if (!query) {
+      return markets || [];
+    }
+    return (markets || []).filter((market) => String(market.market_slug || "").toLowerCase().includes(query));
+  }, [markets, marketQuery]);
+
   const pivotRows = useMemo(() => {
     const agg = new Map();
     (markets || []).forEach((market) => {
@@ -406,11 +437,23 @@ export default function MarketTable({ markets }) {
   return (
     <Card className="market-card" title="Market Summary" bodyStyle={{ padding: 0 }}>
       <div className="market-section">
+        <div className="market-toolbar">
+          <Input.Search
+            allowClear
+            value={marketQuery}
+            onChange={(event) => {
+              setMarketQuery(event.target.value);
+              setMarketPage(1);
+            }}
+            placeholder="Search market name"
+            style={{ maxWidth: 360 }}
+          />
+        </div>
         <Table
           size="small"
           rowKey="market_slug"
           columns={columns}
-          dataSource={markets}
+          dataSource={filteredMarkets}
           expandable={{
             expandedRowRender: (record) => (
               <Table
@@ -424,7 +467,11 @@ export default function MarketTable({ markets }) {
             ),
             rowExpandable: (record) => Array.isArray(record.tokens) && record.tokens.length > 0,
           }}
-          pagination={{ pageSize: 8 }}
+          pagination={{
+            current: marketPage,
+            pageSize: 8,
+            onChange: (page) => setMarketPage(page),
+          }}
           scroll={{ x: 1020 }}
           sortDirections={["descend", "ascend"]}
         />
@@ -442,6 +489,23 @@ export default function MarketTable({ markets }) {
           dataSource={pivotRows}
           pagination={false}
           scroll={{ x: 820 }}
+          sortDirections={["descend", "ascend"]}
+        />
+      </div>
+
+      <Divider orientation="left" style={{ margin: "8px 0 12px" }}>
+        Daily Maker Rebate
+      </Divider>
+
+      <div className="market-section">
+        <Table
+          size="small"
+          rowKey={(record) => `${record.timestamp}-${record.usdc_size}`}
+          columns={makerRebateColumns}
+          dataSource={makerRebates || []}
+          pagination={{ pageSize: 10 }}
+          locale={{ emptyText: "No maker rebate records" }}
+          scroll={{ x: 360 }}
           sortDirections={["descend", "ascend"]}
         />
       </div>

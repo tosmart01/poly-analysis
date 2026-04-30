@@ -7,21 +7,29 @@
 
 中文说明见：[README_zh.md](README_zh.md)
 
-Polymarket real-profit analyzer with a web UI.
+Polymarket market PnL analyzer with a web UI.
 
 ## Scope (Important)
 
-- This tool is primarily designed for Polymarket crypto `updown` markets with taker fees.
-- The dashboard first discovers participated slugs from Polymarket user activity within the selected time range, then replays only the matched markets.
-- It is **not** intended as a universal PnL engine for all Polymarket market types.
-- Main purpose: quantify and visualize the impact of trading fees on real profitability (`Net PnL` vs `No-Fee PnL`).
+- The dashboard discovers markets from Polymarket user activity within the selected time range, then replays the matched markets.
+- It is intended for Polymarket market analysis in general, including but not limited to crypto markets.
+- Main purpose: quantify and visualize realized PnL, fee impact, market-level performance, and `Net PnL` vs `No-Fee PnL`.
 
 ## Requirements
 
 - Python `3.11+` (recommended: `3.11`)
-- `uv` package manager
+- `uv` package manager is optional for local development
 
-## Install As Package
+## Quick Start
+
+```bash
+pip install analysis-poly
+analysis-poly-server --host 127.0.0.1 --port 8000
+```
+
+Open [http://localhost:8000](http://localhost:8000).
+
+## Local Install From Source
 
 ```bash
 uv pip install .
@@ -29,21 +37,18 @@ uv pip install .
 pip install .
 ```
 
-After install:
+Then start the web server with the same one-line command:
 
 ```bash
-analysis-poly
-analysis-poly-open --address 0xabc --keywords updown,15m
+analysis-poly-server --host 127.0.0.1 --port 8000
 ```
 
-## Run
+For source checkout development, this also works:
 
 ```bash
 uv sync
 uv run python main.py
 ```
-
-Open [http://localhost:8000](http://localhost:8000).
 
 ## CLI Open + Auto Start
 

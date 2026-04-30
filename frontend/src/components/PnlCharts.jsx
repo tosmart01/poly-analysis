@@ -149,7 +149,7 @@ function aggregateSeriesPoints(points, aggregation) {
 export default function PnlCharts({ totalSeries, totalSeriesNoFee, symbolSeries, symbolSeriesNoFee, drawdownMarkers }) {
   const [viewMode, setViewMode] = useState("net");
   const [showDrawdownMarks, setShowDrawdownMarks] = useState(false);
-  const [aggregation, setAggregation] = useState("15m");
+  const [aggregation, setAggregation] = useState("raw");
 
   const showNet = viewMode === "net" || viewMode === "compare";
   const showNoFee = viewMode === "no_fee" || viewMode === "compare";

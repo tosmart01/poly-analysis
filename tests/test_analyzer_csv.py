@@ -8,7 +8,7 @@ from analysis_poly.models import AnalysisReport, AnalysisRequest, MarketReport, 
 def test_market_csv_matches_market_table_fields(tmp_path):
     analyzer = PolymarketProfitAnalyzer()
     req = AnalysisRequest(
-        address="0xe00740bce98a594e26861838885ab310ec3b548c",
+        address="0xabc",
         start_ts=100,
         end_ts=200,
         output_dir=str(tmp_path),
