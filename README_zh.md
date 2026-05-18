@@ -64,6 +64,27 @@ uv run -m analysis_poly.open_with_params \
 
 前端会读取 URL 参数，自动填充表单并直接启动。
 
+## 命令行单次执行
+
+如果只需要命令行直接执行并在 `stdout` 返回最终 JSON，而不需要 Web UI 和流式输出，可以使用：
+
+```bash
+analysis-poly-run \
+  --address 0xabc \
+  --keywords updown,15m \
+  --start-time "2026-03-01 00:00" \
+  --end-time "2026-03-02 00:00"
+```
+
+命令会阻塞直到分析结束，同时把产物写入 `output_dir`，最终输出：
+
+```json
+{
+  "status": "COMPLETED",
+  "result": { "...": "..." }
+}
+```
+
 ## 首次拉取说明
 
 仓库已提交 `analysis_poly/static/dist` 构建产物，首次启动不需要先构建前端。

@@ -41,6 +41,7 @@ class _TokenState:
     outcome: str
     lots: deque[_Lot]
     buy_cost_usdc: float = 0.0
+    sell_amount_usdc: float = 0.0
     realized_pnl_usdc: float = 0.0
     taker_fee_usdc: float = 0.0
     maker_reward_usdc: float = 0.0
@@ -59,6 +60,12 @@ class _TokenState:
         if self.buy_qty <= 1e-12:
             return None
         return self.buy_cost_usdc / self.buy_qty
+
+    @property
+    def avg_sell_price(self) -> float | None:
+        if self.sell_qty <= 1e-12:
+            return None
+        return self.sell_amount_usdc / self.sell_qty
 
 
 @dataclass
@@ -223,6 +230,18 @@ class ProfitEngine:
                         if token_state.avg_entry_price is not None
                         else None
                     ),
+                    buy_amount_usdc=round(token_state.buy_cost_usdc, 10),
+                    buy_avg_price=(
+                        round(token_state.avg_entry_price, 10)
+                        if token_state.avg_entry_price is not None
+                        else None
+                    ),
+                    sell_amount_usdc=round(token_state.sell_amount_usdc, 10),
+                    sell_avg_price=(
+                        round(token_state.avg_sell_price, 10)
+                        if token_state.avg_sell_price is not None
+                        else None
+                    ),
                     realized_pnl_usdc=round(token_state.realized_pnl_usdc, 10),
                     taker_fee_usdc=round(token_state.taker_fee_usdc, 10),
                     maker_reward_usdc=round(token_state.maker_reward_usdc, 10),
@@ -289,6 +308,7 @@ class ProfitEngine:
             proceeds = event.size * event.price
             if event.is_taker and self._charge_taker_fee:
                 proceeds -= fee_usdc
+            token_state.sell_amount_usdc += proceeds
             close_deltas, close_warnings = self._close_position(
                 market_slug=market_slug,
                 token_state=token_state,

@@ -331,6 +331,7 @@ async def discover_user_markets_in_range(
     end_ts: int,
     page_limit: int,
     warnings: list[WarningItem],
+    activity_window_sec: int = DISCOVERY_ACTIVITY_WINDOW_SEC,
 ) -> list[DiscoveredMarket]:
     records = await collect_discovery_activity_by_policy(
         client=client,
@@ -339,6 +340,7 @@ async def discover_user_markets_in_range(
         end_ts=end_ts,
         page_limit=page_limit,
         warnings=warnings,
+        activity_window_sec=activity_window_sec,
     )
     return summarize_discovered_markets(records, warnings)
 
@@ -350,6 +352,7 @@ async def discover_user_markets_by_day(
     end_ts: int,
     page_limit: int,
     warnings: list[WarningItem],
+    activity_window_sec: int = DISCOVERY_ACTIVITY_WINDOW_SEC,
 ) -> list[DiscoveredMarket]:
     market_by_key: dict[str, DiscoveredMarket] = {}
     records = await collect_discovery_activity_by_policy(
@@ -359,6 +362,7 @@ async def discover_user_markets_by_day(
         end_ts=end_ts,
         page_limit=page_limit,
         warnings=warnings,
+        activity_window_sec=activity_window_sec,
     )
     for discovered in summarize_discovered_markets(records, warnings):
         market_key = discovered.condition_id or discovered.slug
@@ -384,16 +388,18 @@ async def collect_discovery_activity_by_policy(
     end_ts: int,
     page_limit: int,
     warnings: list[WarningItem],
+    activity_window_sec: int = DISCOVERY_ACTIVITY_WINDOW_SEC,
 ) -> list:
     capped_page_limit = min(max(1, page_limit), DISCOVERY_ACTIVITY_PAGE_LIMIT_MAX)
+    normalized_activity_window_sec = max(1, int(activity_window_sec))
     trade_records = await collect_user_activity_for_windows(
         client=client,
         address=address,
-        windows=iter_day_windows(start_ts, end_ts),
+        windows=iter_day_windows(start_ts, end_ts, normalized_activity_window_sec),
         page_limit=capped_page_limit,
         warnings=warnings,
         activity_types=("TRADE",),
-        label="trade_2h",
+        label=f"trade_{normalized_activity_window_sec}s",
     )
     split_redeem_records = await collect_user_activity_for_windows(
         client=client,
@@ -502,8 +508,12 @@ def activity_key(record) -> str:
     )
 
 
-def iter_day_windows(start_ts: int, end_ts: int) -> list[tuple[int, int]]:
-    return _iter_aligned_windows(start_ts, end_ts, DISCOVERY_ACTIVITY_WINDOW_SEC)
+def iter_day_windows(
+    start_ts: int,
+    end_ts: int,
+    window_sec: int = DISCOVERY_ACTIVITY_WINDOW_SEC,
+) -> list[tuple[int, int]]:
+    return _iter_aligned_windows(start_ts, end_ts, max(1, int(window_sec)))
 
 
 def iter_calendar_day_windows(start_ts: int, end_ts: int) -> list[tuple[int, int]]:

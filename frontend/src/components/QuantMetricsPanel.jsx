@@ -57,10 +57,9 @@ function quantMetrics(totalSeries, totalSeriesNoFee, markets) {
   const finalNoFee = totalSeriesNoFee.length ? Number(totalSeriesNoFee[totalSeriesNoFee.length - 1].value || 0) : 0;
   const feeImpact = finalNoFee - finalPnl;
 
-  const totalTrades = (markets || []).reduce(
-    (acc, market) => acc + (market.tokens || []).reduce((tokenAcc, token) => tokenAcc + Number(token.trade_count || 0), 0),
-    0,
-  );
+  const tradedMarkets = (markets || []).filter(
+    (market) => (market.tokens || []).some((token) => Number(token.trade_count || 0) > EPS),
+  ).length;
 
   const entryAmounts = (markets || [])
     .map((market) =>
@@ -95,7 +94,7 @@ function quantMetrics(totalSeries, totalSeriesNoFee, markets) {
     sortino,
     vol,
     recovery,
-    totalTrades,
+    tradedMarkets,
     avgEntryAmount,
     grossPositivePnl,
     top1ProfitShare: topProfitShare(1),
@@ -283,6 +282,9 @@ export default function QuantMetricsPanel({ totalSeries, totalSeriesNoFee, marke
         </Col>
         <Col xs={12} md={8} lg={4}>
           <div className="metric-kpi"><Statistic title="Step Sharpe" value={fmtStat(metrics.sharpe)} /></div>
+        </Col>
+        <Col xs={12} md={8} lg={4}>
+          <div className="metric-kpi"><Statistic title="Traded Markets" value={metrics.tradedMarkets} /></div>
         </Col>
         <Col xs={12} md={8} lg={4}>
           <div className="metric-kpi"><Statistic title="Avg Entry Amt" value={fmtStat(metrics.avgEntryAmount, "usd")} /></div>

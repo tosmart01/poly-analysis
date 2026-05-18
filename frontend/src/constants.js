@@ -8,14 +8,15 @@ export const EMPTY_SUMMARY = {
   total_maker_reward_usdc: 0,
 };
 
-export function buildDefaultForm(serverDefaults) {
+export function buildDefaultForm(serverDefaults, defaultAddressOverride = "") {
   return {
-    address: serverDefaults.default_address || "",
+    address: defaultAddressOverride || serverDefaults.default_address || "",
     keywords: serverDefaults.default_keywords || DEFAULT_KEYWORDS,
     startTime: "",
     endTime: "",
     feeRateBps: "1000",
     missingCostWarnQty: "0.5",
+    activityWindowSec: "7200",
     concurrency: "5",
     pageLimit: "1000",
   };

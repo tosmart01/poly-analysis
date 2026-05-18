@@ -139,6 +139,14 @@ def test_iter_day_windows_uses_two_hour_windows():
     ]
 
 
+def test_iter_day_windows_accepts_custom_window_size():
+    assert iter_day_windows(10, 7220, 3600) == [
+        (10, 3599),
+        (3600, 7199),
+        (7200, 7220),
+    ]
+
+
 def test_iter_week_windows_groups_exact_week_in_one_window():
     assert iter_week_windows(10, 10 + 7 * 24 * 60 * 60) == [
         (10, 604810),

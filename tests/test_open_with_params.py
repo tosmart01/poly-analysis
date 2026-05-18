@@ -16,6 +16,7 @@ def _args(**kwargs):
         end_ts=None,
         fee_rate_bps=None,
         missing_cost_warn_qty=None,
+        activity_window_sec=None,
         concurrency=None,
         page_limit=None,
         auto_start=False,
@@ -30,6 +31,7 @@ def test_build_bootstrap_query_with_explicit_fields_sets_auto_start():
         keywords="updown,15m",
         start_time="2026-03-01 00:00",
         end_time="2026-03-02 00:00",
+        activity_window_sec=3600,
         concurrency=8,
     )
     query = _build_bootstrap_query(args)
@@ -37,6 +39,7 @@ def test_build_bootstrap_query_with_explicit_fields_sets_auto_start():
     assert query["keywords"] == "updown,15m"
     assert query["start_time"] == "2026-03-01 00:00"
     assert query["end_time"] == "2026-03-02 00:00"
+    assert query["activity_window_sec"] == "3600"
     assert query["concurrency"] == "8"
     assert query["auto_start"] == "1"
 

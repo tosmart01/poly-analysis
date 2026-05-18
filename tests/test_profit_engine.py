@@ -107,6 +107,10 @@ def test_profit_engine_taker_buy_sell_and_redeem_warning():
     assert up.entry_amount_usdc == 5
     assert up.avg_entry_price is not None
     assert up.avg_entry_price > 0.5
+    assert up.buy_amount_usdc == 5
+    assert up.buy_avg_price == up.avg_entry_price
+    assert up.sell_amount_usdc == 2.9136
+    assert up.sell_avg_price == 0.58272
 
 
 def test_redeem_uses_actual_position_when_market_has_fees():

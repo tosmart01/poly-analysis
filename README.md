@@ -66,6 +66,27 @@ uv run -m analysis_poly.open_with_params \
 
 Frontend will read query params, fill form fields, and auto start the run.
 
+## CLI Run Once
+
+Use the synchronous CLI entry when you want a single final JSON payload on `stdout` without SSE or web UI:
+
+```bash
+analysis-poly-run \
+  --address 0xabc \
+  --keywords updown,15m \
+  --start-time "2026-03-01 00:00" \
+  --end-time "2026-03-02 00:00"
+```
+
+The command blocks until analysis finishes, writes report artifacts into `output_dir`, and prints:
+
+```json
+{
+  "status": "COMPLETED",
+  "result": { "...": "..." }
+}
+```
+
 ## First Clone
 
 `analysis_poly/static/dist` is committed in the repository, so first startup does not require front-end build.

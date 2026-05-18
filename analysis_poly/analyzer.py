@@ -28,6 +28,7 @@ from .models import (
     MakerRebateRecord,
     MarketReport,
     SummaryStats,
+    TokenReport,
     WarningItem,
 )
 from .polymarket_client import PolymarketApiClient
@@ -152,6 +153,7 @@ class PolymarketProfitAnalyzer:
                 end_ts=req.end_ts,
                 page_limit=req.page_limit,
                 warnings=all_warnings,
+                activity_window_sec=req.activity_window_sec,
             )
             logger.info(
                 "analyzer discovery complete address={} raw_market_count={} elapsed_sec={:.3f}",
@@ -645,7 +647,8 @@ class PolymarketProfitAnalyzer:
             writer = csv.writer(fp)
             writer.writerow(_MARKET_TABLE_CSV_COLUMNS)
             for market in report.markets:
-                avg_entry_price = _market_avg_entry_price(market)
+                buy_avg_price = _market_buy_avg_price(market)
+                sell_avg_price = _market_sell_avg_price(market)
                 writer.writerow(
                     [
                         market.market_slug,
@@ -654,8 +657,10 @@ class PolymarketProfitAnalyzer:
                         market.taker_fee_usdc,
                         market.maker_reward_usdc,
                         _market_entry_side(market),
-                        _market_entry_amount(market),
-                        "" if avg_entry_price is None else avg_entry_price,
+                        _market_buy_amount(market),
+                        _market_sell_amount(market),
+                        "" if buy_avg_price is None else buy_avg_price,
+                        "" if sell_avg_price is None else sell_avg_price,
                     ]
                 )
         return path
@@ -692,8 +697,10 @@ _MARKET_TABLE_CSV_COLUMNS = [
     "Taker Fee",
     "Maker Reward",
     "Entry Side",
-    "Entry Amt",
-    "Avg Entry",
+    "Buy Amt",
+    "Sell Amt",
+    "Buy Avg Price",
+    "Sell Avg Price",
 ]
 
 
@@ -729,14 +736,45 @@ def _market_entry_side(market_report: MarketReport) -> str:
 
 
 def _market_entry_amount(market_report: MarketReport) -> float:
-    return round(sum(token.entry_amount_usdc for token in market_report.tokens), 10)
+    return _market_buy_amount(market_report)
 
 
 def _market_avg_entry_price(market_report: MarketReport) -> float | None:
+    return _market_buy_avg_price(market_report)
+
+
+def _token_buy_amount(token: TokenReport) -> float:
+    return float(token.buy_amount_usdc or token.entry_amount_usdc or 0.0)
+
+
+def _token_buy_avg_price(token: TokenReport) -> float | None:
+    if token.buy_avg_price is not None:
+        return float(token.buy_avg_price)
+    if token.avg_entry_price is not None:
+        return float(token.avg_entry_price)
+    return None
+
+
+def _market_buy_amount(market_report: MarketReport) -> float:
+    return round(sum(_token_buy_amount(token) for token in market_report.tokens), 10)
+
+
+def _market_sell_amount(market_report: MarketReport) -> float:
+    return round(sum(float(token.sell_amount_usdc or 0.0) for token in market_report.tokens), 10)
+
+
+def _market_buy_avg_price(market_report: MarketReport) -> float | None:
     total_buy_qty = sum(token.buy_qty for token in market_report.tokens)
     if total_buy_qty <= 1e-12:
         return None
-    return round(_market_entry_amount(market_report) / total_buy_qty, 10)
+    return round(_market_buy_amount(market_report) / total_buy_qty, 10)
+
+
+def _market_sell_avg_price(market_report: MarketReport) -> float | None:
+    total_sell_qty = sum(token.sell_qty for token in market_report.tokens)
+    if total_sell_qty <= 1e-12:
+        return None
+    return round(_market_sell_amount(market_report) / total_sell_qty, 10)
 
 
 def _chunk_specs_by_timestamp(
@@ -815,12 +853,21 @@ def _cache_payload_has_entry_fields(report_payload: dict | None) -> bool:
         if abs(float(token.get("maker_reward_usdc", 0) or 0)) > 1e-12:
             return False
         buy_qty = float(token.get("buy_qty", 0) or 0)
-        if buy_qty <= 0:
-            continue
-        if "entry_amount_usdc" not in token:
-            return False
-        if "avg_entry_price" not in token:
-            return False
+        if buy_qty > 0:
+            if "entry_amount_usdc" not in token:
+                return False
+            if "avg_entry_price" not in token:
+                return False
+            if "buy_amount_usdc" not in token:
+                return False
+            if "buy_avg_price" not in token:
+                return False
+        sell_qty = float(token.get("sell_qty", 0) or 0)
+        if sell_qty > 0:
+            if "sell_amount_usdc" not in token:
+                return False
+            if "sell_avg_price" not in token:
+                return False
     return True
 
 

@@ -30,6 +30,14 @@ export default function AdvancedModal({ open, onClose, formData, updateField }) 
             </Form.Item>
           </Col>
           <Col xs={24} md={12}>
+            <Form.Item label="Activity Window Sec">
+              <Input
+                value={formData.activityWindowSec}
+                onChange={(event) => updateField("activityWindowSec", event.target.value)}
+              />
+            </Form.Item>
+          </Col>
+          <Col xs={24} md={12}>
             <Form.Item label="Page Limit">
               <Input value={formData.pageLimit} onChange={(event) => updateField("pageLimit", event.target.value)} />
             </Form.Item>

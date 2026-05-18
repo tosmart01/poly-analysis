@@ -24,6 +24,7 @@ class AnalysisRequest(BaseModel):
     keywords: list[str] = Field(default_factory=list)
     fee_rate_bps: float = 1000
     missing_cost_warn_qty: float = 0.5
+    activity_window_sec: int = 2 * 60 * 60
     page_limit: int = 1000
     concurrency: int = 5
     request_timeout_sec: float = 20
@@ -38,6 +39,13 @@ class AnalysisRequest(BaseModel):
     @classmethod
     def validate_keywords(cls, value: list[str]) -> list[str]:
         return _normalize_string_list(value)
+
+    @field_validator("activity_window_sec")
+    @classmethod
+    def validate_activity_window_sec(cls, value: int) -> int:
+        if int(value) <= 0:
+            raise ValueError("activity_window_sec must be positive")
+        return int(value)
 
     @model_validator(mode="after")
     def validate_time_range(self) -> "AnalysisRequest":
@@ -85,6 +93,10 @@ class TokenReport(BaseModel):
     outcome: Literal["Up", "Down"]
     entry_amount_usdc: float = 0
     avg_entry_price: float | None = None
+    buy_amount_usdc: float = 0
+    buy_avg_price: float | None = None
+    sell_amount_usdc: float = 0
+    sell_avg_price: float | None = None
     realized_pnl_usdc: float = 0
     taker_fee_usdc: float = 0
     maker_reward_usdc: float = 0

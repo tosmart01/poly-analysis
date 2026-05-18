@@ -1,9 +1,14 @@
+import { DownloadOutlined, SettingOutlined, StarFilled } from "@ant-design/icons";
 import { Button, Col, Dropdown, Form, Input, Row } from "antd";
-import { DownloadOutlined } from "@ant-design/icons";
 
 export default function ConfigPanel({
   formData,
   updateField,
+  savedAddresses,
+  currentAddress,
+  onApplySavedAddress,
+  onOpenAddressBook,
+  onSetCurrentDefault,
   onQuickRange,
   downloads,
   onOpenAdvanced,
@@ -48,16 +53,56 @@ export default function ConfigPanel({
     },
   ];
 
+  const addressLabel = (
+    <div className="address-label-row">
+      <span>Address</span>
+      <div className="address-label-actions">
+        <Button size="small" onClick={onSetCurrentDefault}>
+          Set Default
+        </Button>
+        <Button
+          type="text"
+          size="small"
+          icon={<SettingOutlined />}
+          onClick={onOpenAddressBook}
+          className="address-settings-btn"
+          aria-label="Manage addresses"
+        />
+      </div>
+    </div>
+  );
+
   return (
     <section className="config-card">
       <Form layout="vertical" requiredMark={false} className="config-form">
         <Row gutter={[12, 4]} align="bottom">
-          <Col xs={24} lg={13}>
-            <Form.Item label="Address">
-              <Input value={formData.address} onChange={(event) => updateField("address", event.target.value)} />
+          <Col xs={24} lg={14}>
+            <Form.Item label={addressLabel}>
+              <div className="address-field-stack">
+                <Input value={formData.address} onChange={(event) => updateField("address", event.target.value)} />
+                <div className="address-shortcuts">
+                  {savedAddresses.length ? (
+                    savedAddresses.map((entry) => (
+                      <Button
+                        key={entry.id}
+                        size="small"
+                        type={currentAddress === entry.address ? "primary" : "default"}
+                        className={`address-shortcut-btn ${entry.isDefault ? "default" : ""}`}
+                        onClick={() => onApplySavedAddress(entry)}
+                        title={entry.address}
+                      >
+                        {entry.isDefault ? <StarFilled /> : null}
+                        <span>{entry.name}</span>
+                      </Button>
+                    ))
+                  ) : (
+                    <span className="address-shortcuts-empty">Save an address to create one-click shortcuts.</span>
+                  )}
+                </div>
+              </div>
             </Form.Item>
           </Col>
-          <Col xs={18} lg={8}>
+          <Col xs={18} lg={7}>
             <Form.Item label="Keywords">
               <Input
                 value={formData.keywords}
@@ -83,7 +128,7 @@ export default function ConfigPanel({
               <div className="time-line">
                 <div className="time-row">
                   <Input value={formData.startTime} onChange={(event) => updateField("startTime", event.target.value)} placeholder="YYYY-MM-DD HH:MM" />
-                  <span className="time-separator">--</span>
+                  <span className="time-separator">-</span>
                   <Input value={formData.endTime} onChange={(event) => updateField("endTime", event.target.value)} placeholder="YYYY-MM-DD HH:MM" />
                 </div>
                 <div className="quick-range-row">

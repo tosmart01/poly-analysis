@@ -10,6 +10,7 @@ def test_analysis_request_default_concurrency_is_5():
         end_ts=200,
     )
     assert req.concurrency == 5
+    assert req.activity_window_sec == 7200
 
 
 def test_analysis_request_address_only_requires_0x_prefix():
@@ -38,3 +39,13 @@ def test_analysis_request_normalizes_keywords():
         keywords=[" 15M ", "updown", "updown"],
     )
     assert req.keywords == ["15m", "updown"]
+
+
+def test_analysis_request_rejects_non_positive_activity_window_sec():
+    with pytest.raises(ValueError, match="activity_window_sec must be positive"):
+        AnalysisRequest(
+            address="0xabc",
+            start_ts=100,
+            end_ts=200,
+            activity_window_sec=0,
+        )

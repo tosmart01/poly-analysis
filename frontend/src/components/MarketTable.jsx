@@ -66,7 +66,7 @@ function entryDirection(record) {
 
 function entryAmount(record) {
   const tokens = Array.isArray(record?.tokens) ? record.tokens : [];
-  return tokens.reduce((sum, token) => sum + Number(token.entry_amount_usdc || 0), 0);
+  return tokens.reduce((sum, token) => sum + Number(token.buy_amount_usdc || token.entry_amount_usdc || 0), 0);
 }
 
 function avgEntryPrice(record) {
@@ -77,6 +77,20 @@ function avgEntryPrice(record) {
   }
   const totalEntryAmount = entryAmount(record);
   return totalEntryAmount / totalBuyQty;
+}
+
+function sellAmount(record) {
+  const tokens = Array.isArray(record?.tokens) ? record.tokens : [];
+  return tokens.reduce((sum, token) => sum + Number(token.sell_amount_usdc || 0), 0);
+}
+
+function avgSellPrice(record) {
+  const tokens = Array.isArray(record?.tokens) ? record.tokens : [];
+  const totalSellQty = tokens.reduce((sum, token) => sum + Number(token.sell_qty || 0), 0);
+  if (totalSellQty <= 1e-12) {
+    return null;
+  }
+  return sellAmount(record) / totalSellQty;
 }
 
 function buildHistogram(values, bins = 12) {
@@ -140,18 +154,32 @@ const columns = [
     sorter: (a, b) => entryDirection(a).localeCompare(entryDirection(b)),
   },
   {
-    title: "Entry Amt",
-    key: "entry_amount_usdc",
+    title: "Buy Amt",
+    key: "buy_amount_usdc",
     width: 130,
     render: (_value, record) => formatUsd(entryAmount(record)),
     sorter: (a, b) => entryAmount(a) - entryAmount(b),
   },
   {
-    title: "Avg Entry",
-    key: "avg_entry_price",
+    title: "Sell Amt",
+    key: "sell_amount_usdc",
+    width: 130,
+    render: (_value, record) => formatUsd(sellAmount(record)),
+    sorter: (a, b) => sellAmount(a) - sellAmount(b),
+  },
+  {
+    title: "Buy Avg Price",
+    key: "buy_avg_price",
     width: 120,
     render: (_value, record) => formatTokenPrice(avgEntryPrice(record)),
     sorter: (a, b) => Number(avgEntryPrice(a) || 0) - Number(avgEntryPrice(b) || 0),
+  },
+  {
+    title: "Sell Avg Price",
+    key: "sell_avg_price",
+    width: 120,
+    render: (_value, record) => formatTokenPrice(avgSellPrice(record)),
+    sorter: (a, b) => Number(avgSellPrice(a) || 0) - Number(avgSellPrice(b) || 0),
   },
 ];
 
@@ -230,16 +258,30 @@ export default function MarketTable({ markets, makerRebates }) {
       width: 100,
     },
     {
-      title: "Avg Entry",
-      dataIndex: "avg_entry_price",
-      key: "avg_entry_price",
+      title: "Buy Avg",
+      dataIndex: "buy_avg_price",
+      key: "buy_avg_price",
+      width: 110,
+      render: (_value, record) => formatTokenPrice(record.buy_avg_price ?? record.avg_entry_price),
+    },
+    {
+      title: "Sell Avg",
+      dataIndex: "sell_avg_price",
+      key: "sell_avg_price",
       width: 110,
       render: (value) => formatTokenPrice(value),
     },
     {
-      title: "Entry Amt",
-      dataIndex: "entry_amount_usdc",
-      key: "entry_amount_usdc",
+      title: "Buy Amt",
+      dataIndex: "buy_amount_usdc",
+      key: "buy_amount_usdc",
+      width: 120,
+      render: (_value, record) => formatUsd(record.buy_amount_usdc ?? record.entry_amount_usdc),
+    },
+    {
+      title: "Sell Amt",
+      dataIndex: "sell_amount_usdc",
+      key: "sell_amount_usdc",
       width: 120,
       render: (value) => formatUsd(value),
     },

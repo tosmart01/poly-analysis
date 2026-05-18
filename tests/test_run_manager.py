@@ -154,7 +154,12 @@ def test_get_result_returns_compact_payload():
                             outcome="Up",
                             entry_amount_usdc=4.2,
                             avg_entry_price=0.42,
+                            buy_amount_usdc=4.2,
+                            buy_avg_price=0.42,
+                            sell_amount_usdc=2.8,
+                            sell_avg_price=0.56,
                             buy_qty=10,
+                            sell_qty=5,
                             realized_pnl_usdc=1.2,
                             trade_count=2,
                         )
@@ -189,6 +194,9 @@ def test_get_result_returns_compact_payload():
         assert payload["symbol_series"]["btc-5"] == [{"ts": 1000, "value": 0.5}, {"ts": 1010, "value": 1.2}]
         assert payload["markets"][0]["tokens"][0]["entry_amount_usdc"] == 4.2
         assert payload["markets"][0]["tokens"][0]["avg_entry_price"] == 0.42
+        assert payload["markets"][0]["tokens"][0]["buy_amount_usdc"] == 4.2
+        assert payload["markets"][0]["tokens"][0]["sell_amount_usdc"] == 2.8
+        assert payload["markets"][0]["tokens"][0]["sell_avg_price"] == 0.56
         assert payload["artifacts"]["json"] == "/reports/report.json"
 
     asyncio.run(runner())

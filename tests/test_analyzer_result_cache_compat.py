@@ -1,7 +1,7 @@
 from analysis_poly.analyzer import _result_from_cache_payload
 
 
-def test_result_cache_payload_without_entry_fields_is_invalid():
+def test_result_cache_payload_without_trade_flow_fields_is_invalid():
     payload = {
         "market_slug": "btc-updown-5m-1000",
         "market_report": {
@@ -18,6 +18,8 @@ def test_result_cache_payload_without_entry_fields_is_invalid():
                 {
                     "token_id": "up",
                     "outcome": "Up",
+                    "entry_amount_usdc": 4.2,
+                    "avg_entry_price": 0.42,
                     "buy_qty": 10,
                     "sell_qty": 10,
                     "redeem_qty": 0,
@@ -40,6 +42,8 @@ def test_result_cache_payload_without_entry_fields_is_invalid():
                 {
                     "token_id": "up",
                     "outcome": "Up",
+                    "entry_amount_usdc": 4.2,
+                    "avg_entry_price": 0.42,
                     "buy_qty": 10,
                     "sell_qty": 10,
                     "redeem_qty": 0,

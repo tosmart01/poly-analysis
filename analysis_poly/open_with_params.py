@@ -41,6 +41,7 @@ def _build_bootstrap_query(args: argparse.Namespace) -> dict[str, str]:
         "end_time": "end_time",
         "fee_rate_bps": "fee_rate_bps",
         "missing_cost_warn_qty": "missing_cost_warn_qty",
+        "activity_window_sec": "activity_window_sec",
         "concurrency": "concurrency",
         "page_limit": "page_limit",
     }
@@ -64,6 +65,7 @@ def _build_bootstrap_query(args: argparse.Namespace) -> dict[str, str]:
             "end_time",
             "fee_rate_bps",
             "missing_cost_warn_qty",
+            "activity_window_sec",
             "concurrency",
             "page_limit",
         }
@@ -109,6 +111,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--end-ts", type=int, help="Unix timestamp (seconds), used when --end-time is missing")
     parser.add_argument("--fee-rate-bps", type=float)
     parser.add_argument("--missing-cost-warn-qty", type=float)
+    parser.add_argument("--activity-window-sec", type=int)
     parser.add_argument("--concurrency", type=int)
     parser.add_argument("--page-limit", type=int)
     parser.add_argument("--auto-start", action="store_true", help="Force auto start analysis in frontend")

@@ -209,7 +209,10 @@ class RunManager:
         if not ctx.result:
             raise HTTPException(status_code=202, detail="run not finished")
         started = time.perf_counter()
-        payload = _compact_analysis_report(ctx.result, self._to_public_artifact_paths(ctx.result.artifacts))
+        payload = build_analysis_result_payload(
+            ctx.result,
+            self._to_public_artifact_paths(ctx.result.artifacts),
+        )
         logger.info(
             "result compact complete run_id={} markets={} total_series={} symbol_series={} elapsed_sec={:.3f}",
             run_id,
@@ -378,6 +381,10 @@ def _compact_analysis_report(report: AnalysisReport, public_artifacts: dict[str,
     }
 
 
+def build_analysis_result_payload(report: AnalysisReport, artifacts: dict[str, str]) -> dict:
+    return _compact_analysis_report(report, artifacts)
+
+
 def _compact_market_report(market: MarketReport) -> dict:
     return {
         "market_slug": market.market_slug,
@@ -396,6 +403,10 @@ def _compact_token_report(token: TokenReport) -> dict:
         "outcome": token.outcome,
         "entry_amount_usdc": token.entry_amount_usdc,
         "avg_entry_price": token.avg_entry_price,
+        "buy_amount_usdc": token.buy_amount_usdc,
+        "buy_avg_price": token.buy_avg_price,
+        "sell_amount_usdc": token.sell_amount_usdc,
+        "sell_avg_price": token.sell_avg_price,
         "realized_pnl_usdc": token.realized_pnl_usdc,
         "buy_qty": token.buy_qty,
         "sell_qty": token.sell_qty,

@@ -1,5 +1,6 @@
 import { Layout, message } from "antd";
 import { useEffect, useMemo, useRef, useState } from "react";
+import AddressBookModal from "./components/AddressBookModal";
 import AdvancedModal from "./components/AdvancedModal";
 import ConfigPanel from "./components/ConfigPanel";
 import MarketTable from "./components/MarketTable";
@@ -8,6 +9,15 @@ import QuantMetricsPanel from "./components/QuantMetricsPanel";
 import StatusCard from "./components/StatusCard";
 import { buildDefaultForm, EMPTY_SUMMARY } from "./constants";
 import { createRun, fetchRunResult, stopRun } from "./services/api";
+import {
+  getDefaultAddressEntry,
+  isAddressLike,
+  loadAddressBook,
+  normalizeAddress,
+  persistAddressBook,
+  sanitizeAddressBook,
+  sortAddressBook,
+} from "./utils/addressBook";
 import { parseDateTimeTextToUnixSeconds, toDateTimeText } from "./utils/dateTime";
 
 const IDLE_WARNING = "No warnings. Strategy is running with live market aggregation.";
@@ -104,6 +114,7 @@ function parseBootstrapFromQuery(searchText) {
     end_time: "endTime",
     fee_rate_bps: "feeRateBps",
     missing_cost_warn_qty: "missingCostWarnQty",
+    activity_window_sec: "activityWindowSec",
     concurrency: "concurrency",
     page_limit: "pageLimit",
   };
@@ -154,12 +165,23 @@ function bucketLiveCurveTs(timestamp) {
 }
 
 export default function App({ serverDefaults }) {
-  const [formData, setFormData] = useState(() => buildDefaultForm(serverDefaults));
+  const initialAddressBookRef = useRef(null);
+  if (initialAddressBookRef.current === null) {
+    initialAddressBookRef.current = loadAddressBook(serverDefaults.default_address || "");
+  }
+  const initialAddressBook = initialAddressBookRef.current;
+
+  const [savedAddresses, setSavedAddresses] = useState(() => initialAddressBook);
+  const [formData, setFormData] = useState(() =>
+    buildDefaultForm(serverDefaults, getDefaultAddressEntry(initialAddressBook)?.address || ""),
+  );
   const [runId, setRunId] = useState(null);
   const [runStatus, setRunStatus] = useState("IDLE");
   const [running, setRunning] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [addressBookOpen, setAddressBookOpen] = useState(false);
+  const [addressBookDraftSeed, setAddressBookDraftSeed] = useState(null);
 
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [summary, setSummary] = useState(EMPTY_SUMMARY);
@@ -182,18 +204,44 @@ export default function App({ serverDefaults }) {
   const symbolByTsNoFeeRef = useRef(new Map());
   const liveCurvePointCountRef = useRef(0);
   const liveCurvesPausedRef = useRef(false);
+  const savedDefaultAppliedRef = useRef(false);
 
   useEffect(() => {
-    const end = new Date();
-    end.setSeconds(0, 0);
-    const start = new Date(end);
+    const start = new Date();
     start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setHours(23, 59, 0, 0);
     setFormData((prev) => ({
       ...prev,
       startTime: prev.startTime || toDateTimeText(start),
       endTime: prev.endTime || toDateTimeText(end),
     }));
   }, []);
+
+  useEffect(() => {
+    persistAddressBook(savedAddresses);
+  }, [savedAddresses]);
+
+  useEffect(() => {
+    if (savedDefaultAppliedRef.current) {
+      return;
+    }
+    savedDefaultAppliedRef.current = true;
+
+    const defaultEntry = getDefaultAddressEntry(savedAddresses);
+    if (!defaultEntry) {
+      return;
+    }
+
+    const serverDefault = normalizeAddress(serverDefaults.default_address || "");
+    setFormData((prev) => {
+      const currentAddress = normalizeAddress(prev.address);
+      if (currentAddress && currentAddress !== serverDefault) {
+        return prev;
+      }
+      return { ...prev, address: defaultEntry.address };
+    });
+  }, [savedAddresses, serverDefaults.default_address]);
 
   useEffect(
     () => () => {
@@ -249,9 +297,133 @@ export default function App({ serverDefaults }) {
         : rawProgressPercent;
   const latestWarning = warnings[0] || IDLE_WARNING;
   const statusText = statusMessage || latestWarning;
+  const currentAddress = useMemo(() => normalizeAddress(formData.address), [formData.address]);
 
   function updateField(key, value) {
     setFormData((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function openAddressBook(draftSeed = null) {
+    setAddressBookDraftSeed(draftSeed);
+    setAddressBookOpen(true);
+  }
+
+  function closeAddressBook() {
+    setAddressBookOpen(false);
+    setAddressBookDraftSeed(null);
+  }
+
+  function handleApplySavedAddress(entry) {
+    updateField("address", entry.address);
+  }
+
+  function handleOpenAddressBook() {
+    const normalized = normalizeAddress(formData.address);
+    if (!isAddressLike(normalized)) {
+      openAddressBook();
+      return;
+    }
+
+    const existing = savedAddresses.find((entry) => entry.address === normalized);
+    openAddressBook(existing ? existing : { name: "", address: normalized, makeDefault: false });
+  }
+
+  function handleSetCurrentDefault() {
+    const normalized = normalizeAddress(formData.address);
+    if (!isAddressLike(normalized)) {
+      message.error("Address must start with 0x");
+      return;
+    }
+
+    const existing = savedAddresses.find((entry) => entry.address === normalized);
+    if (existing) {
+      handleSetDefaultAddress(existing.id);
+      return;
+    }
+
+    openAddressBook({ name: "", address: normalized, makeDefault: true });
+  }
+
+  function handleSaveAddressEntry(draft) {
+    const name = String(draft?.name || "").trim();
+    const address = normalizeAddress(draft?.address);
+    const editingId = normalizeAddress(draft?.id);
+
+    if (!name) {
+      message.error("Name is required");
+      return false;
+    }
+    if (!isAddressLike(address)) {
+      message.error("Address must start with 0x");
+      return false;
+    }
+
+    const duplicate = savedAddresses.find((entry) => entry.address === address && entry.id !== editingId);
+    if (duplicate) {
+      message.error("This address is already saved");
+      return false;
+    }
+
+    setSavedAddresses((prev) => {
+      const currentEntries = sanitizeAddressBook(prev);
+      const previousEntry = currentEntries.find((entry) => entry.id === editingId);
+      const nextEntries = currentEntries.filter((entry) => entry.id !== editingId);
+      const shouldBecomeDefault = Boolean(draft?.makeDefault) || previousEntry?.isDefault || nextEntries.length === 0;
+
+      const updatedEntries = sanitizeAddressBook([
+        ...nextEntries,
+        {
+          id: address,
+          name,
+          address,
+          isDefault: shouldBecomeDefault,
+        },
+      ]);
+
+      return sortAddressBook(updatedEntries);
+    });
+    updateField("address", address);
+    message.success(editingId ? "Address updated" : "Address saved");
+    setAddressBookDraftSeed(null);
+    return true;
+  }
+
+  function handleDeleteSavedAddress(entryId) {
+    const deletingId = normalizeAddress(entryId);
+    const removedEntry = savedAddresses.find((entry) => entry.id === deletingId);
+    const nextEntries = sanitizeAddressBook(savedAddresses.filter((entry) => entry.id !== deletingId));
+    setSavedAddresses(nextEntries);
+
+    const nextDefault = getDefaultAddressEntry(nextEntries);
+    if (removedEntry?.isDefault && currentAddress === removedEntry.address && nextDefault) {
+      updateField("address", nextDefault.address);
+    }
+
+    if (addressBookDraftSeed?.id === deletingId) {
+      setAddressBookDraftSeed(null);
+    }
+    message.success("Address deleted");
+  }
+
+  function handleSetDefaultAddress(entryId) {
+    const targetId = normalizeAddress(entryId);
+    const entry = savedAddresses.find((item) => item.id === targetId);
+    if (!entry) {
+      return;
+    }
+
+    setSavedAddresses((prev) =>
+      sortAddressBook(
+        sanitizeAddressBook(
+          prev.map((item) => ({
+            ...item,
+            isDefault: item.id === targetId,
+          })),
+        ),
+      ),
+    );
+    updateField("address", entry.address);
+    message.success("Default address updated");
   }
 
   function applyQuickRange(days) {
@@ -639,6 +811,7 @@ export default function App({ serverDefaults }) {
         .filter(Boolean),
       fee_rate_bps: Number(sourceFormData.feeRateBps),
       missing_cost_warn_qty: Number(sourceFormData.missingCostWarnQty),
+      activity_window_sec: Number(sourceFormData.activityWindowSec),
       concurrency: Number(sourceFormData.concurrency),
       page_limit: Number(sourceFormData.pageLimit),
       request_timeout_sec: 20,
@@ -710,6 +883,11 @@ export default function App({ serverDefaults }) {
         <ConfigPanel
           formData={formData}
           updateField={updateField}
+          savedAddresses={savedAddresses}
+          currentAddress={currentAddress}
+          onApplySavedAddress={handleApplySavedAddress}
+          onOpenAddressBook={handleOpenAddressBook}
+          onSetCurrentDefault={handleSetCurrentDefault}
           onQuickRange={applyQuickRange}
           downloads={downloads}
           onOpenAdvanced={() => setAdvancedOpen(true)}
@@ -733,6 +911,17 @@ export default function App({ serverDefaults }) {
       </div>
 
       <AdvancedModal open={advancedOpen} onClose={() => setAdvancedOpen(false)} formData={formData} updateField={updateField} />
+      <AddressBookModal
+        open={addressBookOpen}
+        onClose={closeAddressBook}
+        entries={savedAddresses}
+        currentAddress={currentAddress}
+        draftSeed={addressBookDraftSeed}
+        onSubmit={handleSaveAddressEntry}
+        onApply={handleApplySavedAddress}
+        onDelete={handleDeleteSavedAddress}
+        onSetDefault={handleSetDefaultAddress}
+      />
     </Layout>
   );
 }
