@@ -14,12 +14,10 @@ if __package__ in (None, ""):
     from analysis_poly.analyzer import PolymarketProfitAnalyzer
     from analysis_poly.logging_config import configure_logging
     from analysis_poly.models import AnalysisRequest, RunStatus
-    from analysis_poly.run_manager import build_analysis_result_payload
 else:
     from .analyzer import PolymarketProfitAnalyzer
     from .logging_config import configure_logging
     from .models import AnalysisRequest, RunStatus
-    from .run_manager import build_analysis_result_payload
 
 
 def _parse_datetime_text(value: str) -> int:
@@ -98,7 +96,7 @@ async def _run_once(req: AnalysisRequest) -> dict:
     status = RunStatus.STOPPED if report.is_partial else RunStatus.COMPLETED
     return {
         "status": status,
-        "result": build_analysis_result_payload(report, report.artifacts),
+        "summary": report.summary.model_dump(),
     }
 
 

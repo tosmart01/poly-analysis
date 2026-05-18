@@ -113,5 +113,5 @@ def test_run_once_returns_completed_payload(monkeypatch, tmp_path):
     payload = asyncio.run(_run_once(req))
 
     assert payload["status"] == "COMPLETED"
-    assert payload["result"]["summary"]["markets_processed"] == 1
-    assert payload["result"]["artifacts"]["json"].endswith("_final.json")
+    assert payload["summary"]["markets_processed"] == 1
+    assert "result" not in payload

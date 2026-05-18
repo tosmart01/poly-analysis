@@ -81,7 +81,7 @@ analysis-poly-run \
 ```json
 {
   "status": "COMPLETED",
-  "result": { "...": "..." }
+  "summary": { "...": "..." }
 }
 ```
 
