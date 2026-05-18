@@ -114,4 +114,6 @@ def test_run_once_returns_completed_payload(monkeypatch, tmp_path):
 
     assert payload["status"] == "COMPLETED"
     assert payload["summary"]["markets_processed"] == 1
-    assert "result" not in payload
+    assert payload["artifacts"]["json"].endswith("_final.json")
+    assert payload["artifacts"]["total_curve_csv"].endswith("_final.csv")
+    assert payload["artifacts"]["market_curve_csv"].endswith("_final.csv")

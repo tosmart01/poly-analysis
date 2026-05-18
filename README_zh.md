@@ -81,7 +81,12 @@ analysis-poly-run \
 ```json
 {
   "status": "COMPLETED",
-  "summary": { "...": "..." }
+  "summary": { "...": "..." },
+  "artifacts": {
+    "json": "reports/...",
+    "total_curve_csv": "reports/...",
+    "market_curve_csv": "reports/..."
+  }
 }
 ```
 

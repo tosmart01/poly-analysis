@@ -83,7 +83,12 @@ The command blocks until analysis finishes, writes report artifacts into `output
 ```json
 {
   "status": "COMPLETED",
-  "summary": { "...": "..." }
+  "summary": { "...": "..." },
+  "artifacts": {
+    "json": "reports/...",
+    "total_curve_csv": "reports/...",
+    "market_curve_csv": "reports/..."
+  }
 }
 ```
 

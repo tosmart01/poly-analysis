@@ -97,6 +97,7 @@ async def _run_once(req: AnalysisRequest) -> dict:
     return {
         "status": status,
         "summary": report.summary.model_dump(),
+        "artifacts": report.artifacts,
     }
 
 
