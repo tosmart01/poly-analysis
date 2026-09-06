@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 
 
@@ -29,3 +30,16 @@ def generate_market_slug_specs(
                 ts += step
     specs.sort(key=lambda s: (s.timestamp, s.symbol, s.interval))
     return specs
+
+
+def market_timestamp_from_slug(slug: str) -> int | None:
+    """Read timestamp suffixes without treating calendar dates as epoch seconds."""
+    normalized = str(slug or "")
+    suffix = normalized.rsplit("-", 1)[-1]
+    # Short timestamps are supported for up/down markets and replay fixtures.
+    if not re.fullmatch(r"[0-9]{10}", suffix) and not re.fullmatch(
+        r".+-updown-[0-9]+[mhd]-[0-9]+", normalized
+    ):
+        return None
+    timestamp = int(suffix)
+    return timestamp if timestamp > 0 else None

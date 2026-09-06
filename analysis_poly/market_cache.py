@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .slugs import market_timestamp_from_slug
+
 import json
 import re
 from pathlib import Path
@@ -119,10 +121,7 @@ class MarketMetadataCache:
 
 
 def _market_ts_from_slug(slug: str) -> int | None:
-    try:
-        return int(str(slug).rsplit("-", 1)[-1])
-    except Exception:  # noqa: BLE001
-        return None
+    return market_timestamp_from_slug(slug)
 
 
 def _symbol_from_slug(slug: str) -> str | None:

@@ -19,6 +19,7 @@ from .activity_discovery import (
     discover_user_markets_by_day,
     iter_week_windows,
 )
+from .slugs import market_timestamp_from_slug
 from .market_cache import MarketMetadataCache
 from .market_result_cache import AddressMarketResultCache
 from .models import (
@@ -647,22 +648,24 @@ class PolymarketProfitAnalyzer:
             writer = csv.writer(fp)
             writer.writerow(_MARKET_TABLE_CSV_COLUMNS)
             for market in report.markets:
-                buy_avg_price = _market_buy_avg_price(market)
-                sell_avg_price = _market_sell_avg_price(market)
-                writer.writerow(
-                    [
-                        market.market_slug,
-                        _market_trade_time(market.market_slug),
-                        market.realized_pnl_usdc,
-                        market.taker_fee_usdc,
-                        market.maker_reward_usdc,
-                        _market_entry_side(market),
-                        _market_buy_amount(market),
-                        _market_sell_amount(market),
-                        "" if buy_avg_price is None else buy_avg_price,
-                        "" if sell_avg_price is None else sell_avg_price,
-                    ]
-                )
+                for token in _market_table_tokens(market):
+                    buy_avg_price = _token_buy_avg_price(token)
+                    sell_avg_price = _token_sell_avg_price(token)
+                    writer.writerow(
+                        [
+                            market.market_slug,
+                            _market_trade_time(market.market_slug),
+                            _trade_time(token.last_trade_timestamp),
+                            token.realized_pnl_usdc,
+                            token.taker_fee_usdc,
+                            token.maker_reward_usdc,
+                            token.outcome,
+                            _token_buy_amount(token),
+                            _token_sell_amount(token),
+                            "" if buy_avg_price is None else buy_avg_price,
+                            "" if sell_avg_price is None else sell_avg_price,
+                        ]
+                    )
         return path
 
     def save_curve_csv(self, report: AnalysisReport, path: str | None = None) -> str:
@@ -680,10 +683,8 @@ def _cumulative_at(by_ts: dict[int, float], ts: int) -> float:
 
 
 def _market_order_key(slug: str) -> tuple[int, str]:
-    try:
-        return int(str(slug).rsplit("-", 1)[-1]), slug
-    except Exception:  # noqa: BLE001
-        return 10**18, slug
+    timestamp = market_timestamp_from_slug(slug)
+    return (timestamp if timestamp is not None else 10**18), slug
 
 
 def _has_market_trade_activity(market_report: MarketReport) -> bool:
@@ -692,11 +693,12 @@ def _has_market_trade_activity(market_report: MarketReport) -> bool:
 
 _MARKET_TABLE_CSV_COLUMNS = [
     "Market",
+    "Market Time",
     "Trade Time",
     "Realized PnL",
     "Taker Fee",
     "Maker Reward",
-    "Entry Side",
+    "Outcome",
     "Buy Amt",
     "Sell Amt",
     "Buy Avg Price",
@@ -705,13 +707,7 @@ _MARKET_TABLE_CSV_COLUMNS = [
 
 
 def _market_ts(market_slug: str) -> int | None:
-    try:
-        ts = int(str(market_slug or "").split("-")[-1])
-    except ValueError:
-        return None
-    if ts <= 0:
-        return None
-    return ts
+    return market_timestamp_from_slug(market_slug)
 
 
 def _market_trade_time(market_slug: str) -> str:
@@ -721,18 +717,17 @@ def _market_trade_time(market_slug: str) -> str:
     return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _market_entry_side(market_report: MarketReport) -> str:
-    sides = []
-    for token in market_report.tokens:
-        if token.buy_qty > 0 or token.entry_amount_usdc > 0:
-            sides.append(token.outcome)
-
-    unique_sides = list(dict.fromkeys(side for side in sides if side))
-    if not unique_sides:
+def _trade_time(ts: int | None) -> str:
+    if ts is None or int(ts) <= 0:
         return "-"
-    if len(unique_sides) == 1:
-        return unique_sides[0]
-    return "Both"
+    return datetime.fromtimestamp(int(ts)).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _market_entry_side(market_report: MarketReport) -> str:
+    tokens = _market_table_tokens(market_report)
+    if not tokens:
+        return "-"
+    return tokens[0].outcome
 
 
 def _market_entry_amount(market_report: MarketReport) -> float:
@@ -753,6 +748,29 @@ def _token_buy_avg_price(token: TokenReport) -> float | None:
     if token.avg_entry_price is not None:
         return float(token.avg_entry_price)
     return None
+
+
+def _token_sell_amount(token: TokenReport) -> float:
+    return float(token.sell_amount_usdc or 0.0)
+
+
+def _token_sell_avg_price(token: TokenReport) -> float | None:
+    if token.sell_avg_price is None:
+        return None
+    return float(token.sell_avg_price)
+
+
+def _market_table_tokens(market_report: MarketReport) -> list[TokenReport]:
+    return [
+        token
+        for token in market_report.tokens
+        if (
+            token.trade_count > 0
+            or abs(float(token.realized_pnl_usdc or 0.0)) > 1e-12
+            or abs(_token_buy_amount(token)) > 1e-12
+            or abs(_token_sell_amount(token)) > 1e-12
+        )
+    ]
 
 
 def _market_buy_amount(market_report: MarketReport) -> float:

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.9 - 2026-09-06
+
+- Fix sports markets being excluded when calendar-date slug suffixes were interpreted as Unix timestamps.
+- Use consistent timestamp parsing for market filtering, ordering, caching, and settlement.
+- Show per-outcome market rows and actual trade times in the UI and CSV exports.
+- Include token fees and maker rewards in streamed results.
+- Add one-day time-window navigation and remove the default keyword filter.
+- Exclude generated analysis outputs from source control and release packages.
+
 ## 2026-04-28
 
 ### Fixes

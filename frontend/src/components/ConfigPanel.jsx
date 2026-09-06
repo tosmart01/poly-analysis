@@ -1,4 +1,4 @@
-import { DownloadOutlined, SettingOutlined, StarFilled } from "@ant-design/icons";
+import { DownloadOutlined, MinusOutlined, PlusOutlined, SettingOutlined, StarFilled } from "@ant-design/icons";
 import { Button, Col, Dropdown, Form, Input, Row } from "antd";
 
 export default function ConfigPanel({
@@ -10,6 +10,7 @@ export default function ConfigPanel({
   onOpenAddressBook,
   onSetCurrentDefault,
   onQuickRange,
+  onShiftTimeWindow,
   downloads,
   onOpenAdvanced,
   onToggleRun,
@@ -132,6 +133,26 @@ export default function ConfigPanel({
                   <Input value={formData.endTime} onChange={(event) => updateField("endTime", event.target.value)} placeholder="YYYY-MM-DD HH:MM" />
                 </div>
                 <div className="quick-range-row">
+                  <Button
+                    size="small"
+                    icon={<MinusOutlined />}
+                    onClick={() => onShiftTimeWindow(-1)}
+                    aria-label="Shift time window back one day"
+                    title="Shift time window back one day"
+                    className="time-step-btn"
+                  >
+                    1D
+                  </Button>
+                  <Button
+                    size="small"
+                    icon={<PlusOutlined />}
+                    onClick={() => onShiftTimeWindow(1)}
+                    aria-label="Shift time window forward one day"
+                    title="Shift time window forward one day"
+                    className="time-step-btn"
+                  >
+                    1D
+                  </Button>
                   <Button size="small" onClick={() => onQuickRange(3)}>
                     Last 3D
                   </Button>

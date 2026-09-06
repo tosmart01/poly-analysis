@@ -91,6 +91,7 @@ class CurvePoint(BaseModel):
 class TokenReport(BaseModel):
     token_id: str
     outcome: Literal["Up", "Down"]
+    last_trade_timestamp: int | None = None
     entry_amount_usdc: float = 0
     avg_entry_price: float | None = None
     buy_amount_usdc: float = 0

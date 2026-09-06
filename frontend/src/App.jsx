@@ -438,6 +438,22 @@ export default function App({ serverDefaults }) {
     }));
   }
 
+  function shiftTimeWindowDays(days) {
+    try {
+      const start = new Date(parseDateTimeTextToUnixSeconds(formData.startTime) * 1000);
+      const end = new Date(parseDateTimeTextToUnixSeconds(formData.endTime) * 1000);
+      start.setDate(start.getDate() + days);
+      end.setDate(end.getDate() + days);
+      setFormData((prev) => ({
+        ...prev,
+        startTime: toDateTimeText(start),
+        endTime: toDateTimeText(end),
+      }));
+    } catch (error) {
+      message.error(error.message || "Invalid time window");
+    }
+  }
+
   function pushWarning(text) {
     if (!text) {
       return;
@@ -889,6 +905,7 @@ export default function App({ serverDefaults }) {
           onOpenAddressBook={handleOpenAddressBook}
           onSetCurrentDefault={handleSetCurrentDefault}
           onQuickRange={applyQuickRange}
+          onShiftTimeWindow={shiftTimeWindowDays}
           downloads={downloads}
           onOpenAdvanced={() => setAdvancedOpen(true)}
           onToggleRun={handleToggleRun}

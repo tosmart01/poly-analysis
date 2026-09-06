@@ -104,6 +104,7 @@ def test_profit_engine_taker_buy_sell_and_redeem_warning():
     # outcomePrices not unique winner => redeem skipped warning
     assert any(w.code == "REDEEM_SKIP_UNKNOWN_WINNER" for w in warnings)
     up = next(t for t in report.tokens if t.token_id == "up_token")
+    assert up.last_trade_timestamp == 1774832410
     assert up.entry_amount_usdc == 5
     assert up.avg_entry_price is not None
     assert up.avg_entry_price > 0.5

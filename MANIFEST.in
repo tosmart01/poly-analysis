@@ -1,0 +1,6 @@
+prune analysis_poly/outputs
+prune analysis_poly/output
+prune analysis_poly/reports
+prune analysis_poly/.cache
+exclude analysis_poly/a.json
+global-exclude __pycache__ *.py[cod] *.log

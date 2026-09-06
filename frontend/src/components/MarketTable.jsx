@@ -20,6 +20,14 @@ function marketLocalTime(slug) {
   return dayjs(ts * 1000).format("YYYY-MM-DD HH:mm:ss");
 }
 
+function actualTradeTime(timestamp) {
+  const ts = Number(timestamp || 0);
+  if (!Number.isFinite(ts) || ts <= 0) {
+    return "-";
+  }
+  return dayjs(ts * 1000).format("YYYY-MM-DD HH:mm:ss");
+}
+
 function marketPrefix(slug) {
   const raw = String(slug || "").trim().toLowerCase();
   if (!raw) {
@@ -48,28 +56,21 @@ function formatTokenPrice(value) {
 }
 
 function entryDirection(record) {
-  const tokens = Array.isArray(record?.tokens) ? record.tokens : [];
-  const sides = tokens
-    .filter((token) => Number(token.buy_qty || 0) > 0 || Number(token.entry_amount_usdc || 0) > 0)
-    .map((token) => String(token.outcome || "").trim())
-    .filter(Boolean);
-
-  const uniqueSides = [...new Set(sides)];
-  if (!uniqueSides.length) {
-    return "-";
-  }
-  if (uniqueSides.length === 1) {
-    return uniqueSides[0];
-  }
-  return "Both";
+  return String(record?.entry_side || record?.outcome || "").trim() || "-";
 }
 
 function entryAmount(record) {
+  if (record?.buy_amount_usdc != null || record?.entry_amount_usdc != null) {
+    return Number(record.buy_amount_usdc || record.entry_amount_usdc || 0);
+  }
   const tokens = Array.isArray(record?.tokens) ? record.tokens : [];
   return tokens.reduce((sum, token) => sum + Number(token.buy_amount_usdc || token.entry_amount_usdc || 0), 0);
 }
 
 function avgEntryPrice(record) {
+  if (record?.buy_avg_price != null || record?.avg_entry_price != null) {
+    return record.buy_avg_price ?? record.avg_entry_price;
+  }
   const tokens = Array.isArray(record?.tokens) ? record.tokens : [];
   const totalBuyQty = tokens.reduce((sum, token) => sum + Number(token.buy_qty || 0), 0);
   if (totalBuyQty <= 1e-12) {
@@ -80,17 +81,55 @@ function avgEntryPrice(record) {
 }
 
 function sellAmount(record) {
+  if (record?.sell_amount_usdc != null) {
+    return Number(record.sell_amount_usdc || 0);
+  }
   const tokens = Array.isArray(record?.tokens) ? record.tokens : [];
   return tokens.reduce((sum, token) => sum + Number(token.sell_amount_usdc || 0), 0);
 }
 
 function avgSellPrice(record) {
+  if (record?.sell_avg_price != null) {
+    return record.sell_avg_price;
+  }
   const tokens = Array.isArray(record?.tokens) ? record.tokens : [];
   const totalSellQty = tokens.reduce((sum, token) => sum + Number(token.sell_qty || 0), 0);
   if (totalSellQty <= 1e-12) {
     return null;
   }
   return sellAmount(record) / totalSellQty;
+}
+
+function hasMarketRowActivity(token) {
+  return (
+    Number(token?.trade_count || 0) > 0 ||
+    Math.abs(Number(token?.realized_pnl_usdc || 0)) > 1e-12 ||
+    Math.abs(Number(token?.buy_amount_usdc || token?.entry_amount_usdc || 0)) > 1e-12 ||
+    Math.abs(Number(token?.sell_amount_usdc || 0)) > 1e-12
+  );
+}
+
+function buildMarketRows(markets) {
+  return (markets || []).flatMap((market) =>
+    (Array.isArray(market?.tokens) ? market.tokens : [])
+      .filter(hasMarketRowActivity)
+      .map((token) => ({
+        row_id: `${market.market_slug}:${token.token_id}`,
+        market_slug: market.market_slug,
+        condition_id: market.condition_id,
+        up_token_id: market.up_token_id,
+        down_token_id: market.down_token_id,
+        realized_pnl_usdc: Number(token.realized_pnl_usdc || 0),
+        taker_fee_usdc: Number(token.taker_fee_usdc || 0),
+        maker_reward_usdc: Number(token.maker_reward_usdc || 0),
+        last_trade_timestamp: token.last_trade_timestamp,
+        ending_position_up: market.ending_position_up,
+        ending_position_down: market.ending_position_down,
+        entry_side: token.outcome,
+        tokens: [token],
+        ...token,
+      })),
+  );
 }
 
 function buildHistogram(values, bins = 12) {
@@ -122,20 +161,29 @@ const columns = [
     dataIndex: "market_slug",
     key: "market_slug",
     ellipsis: true,
-    width: 280,
+    width: 300,
     sorter: (a, b) => String(a.market_slug || "").localeCompare(String(b.market_slug || "")),
   },
   {
-    title: "Trade Time",
-    key: "trade_time",
+    title: "Market Time",
+    key: "market_time",
     width: 180,
     render: (_value, record) => marketLocalTime(record.market_slug),
     sorter: (a, b) => Number(marketTs(a.market_slug) || 0) - Number(marketTs(b.market_slug) || 0),
   },
   {
+    title: "Trade Time",
+    key: "trade_time",
+    width: 190,
+    render: (_value, record) => actualTradeTime(record.last_trade_timestamp),
+    sorter: (a, b) => Number(a.last_trade_timestamp || 0) - Number(b.last_trade_timestamp || 0),
+  },
+  {
     title: "Realized PnL",
     dataIndex: "realized_pnl_usdc",
     key: "realized_pnl_usdc",
+    align: "right",
+    width: 130,
     render: (value) => formatUsd(value),
     sorter: (a, b) => Number(a.realized_pnl_usdc || 0) - Number(b.realized_pnl_usdc || 0),
   },
@@ -143,11 +191,13 @@ const columns = [
     title: "Taker Fee",
     dataIndex: "taker_fee_usdc",
     key: "taker_fee_usdc",
+    align: "right",
+    width: 120,
     render: (value) => formatUsd(value),
     sorter: (a, b) => Number(a.taker_fee_usdc || 0) - Number(b.taker_fee_usdc || 0),
   },
   {
-    title: "Entry Side",
+    title: "Outcome",
     key: "entry_side",
     width: 120,
     render: (_value, record) => entryDirection(record),
@@ -156,6 +206,7 @@ const columns = [
   {
     title: "Buy Amt",
     key: "buy_amount_usdc",
+    align: "right",
     width: 130,
     render: (_value, record) => formatUsd(entryAmount(record)),
     sorter: (a, b) => entryAmount(a) - entryAmount(b),
@@ -163,6 +214,7 @@ const columns = [
   {
     title: "Sell Amt",
     key: "sell_amount_usdc",
+    align: "right",
     width: 130,
     render: (_value, record) => formatUsd(sellAmount(record)),
     sorter: (a, b) => sellAmount(a) - sellAmount(b),
@@ -170,14 +222,16 @@ const columns = [
   {
     title: "Buy Avg Price",
     key: "buy_avg_price",
-    width: 120,
+    align: "right",
+    width: 140,
     render: (_value, record) => formatTokenPrice(avgEntryPrice(record)),
     sorter: (a, b) => Number(avgEntryPrice(a) || 0) - Number(avgEntryPrice(b) || 0),
   },
   {
     title: "Sell Avg Price",
     key: "sell_avg_price",
-    width: 120,
+    align: "right",
+    width: 140,
     render: (_value, record) => formatTokenPrice(avgSellPrice(record)),
     sorter: (a, b) => Number(avgSellPrice(a) || 0) - Number(avgSellPrice(b) || 0),
   },
@@ -206,14 +260,19 @@ const makerRebateColumns = [
 export default function MarketTable({ markets, makerRebates }) {
   const [marketQuery, setMarketQuery] = useState("");
   const [marketPage, setMarketPage] = useState(1);
+  const marketRows = useMemo(() => buildMarketRows(markets), [markets]);
 
   const filteredMarkets = useMemo(() => {
     const query = marketQuery.trim().toLowerCase();
     if (!query) {
-      return markets || [];
+      return marketRows;
     }
-    return (markets || []).filter((market) => String(market.market_slug || "").toLowerCase().includes(query));
-  }, [markets, marketQuery]);
+    return marketRows.filter((market) => {
+      const marketSlug = String(market.market_slug || "").toLowerCase();
+      const entrySide = String(market.entry_side || "").toLowerCase();
+      return marketSlug.includes(query) || entrySide.includes(query);
+    });
+  }, [marketRows, marketQuery]);
 
   const pivotRows = useMemo(() => {
     const agg = new Map();
@@ -493,7 +552,7 @@ export default function MarketTable({ markets, makerRebates }) {
         </div>
         <Table
           size="small"
-          rowKey="market_slug"
+          rowKey="row_id"
           columns={columns}
           dataSource={filteredMarkets}
           expandable={{
@@ -514,7 +573,7 @@ export default function MarketTable({ markets, makerRebates }) {
             pageSize: 8,
             onChange: (page) => setMarketPage(page),
           }}
-          scroll={{ x: 1020 }}
+          scroll={{ x: 1620 }}
           sortDirections={["descend", "ascend"]}
         />
       </div>

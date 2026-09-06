@@ -26,3 +26,8 @@ node_modules/
 *.log
 analysis_poly/reports/
 analysis_poly/.cache/
+
+# Generated analysis output
+output/
+outputs/
+analysis_poly/a.json

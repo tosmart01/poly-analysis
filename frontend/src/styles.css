@@ -414,7 +414,7 @@ body {
 .quick-range-row {
   display: flex;
   align-items: center;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 5px;
   margin-top: 0;
 }
@@ -428,6 +428,11 @@ body {
   min-width: 58px;
   height: 28px;
   padding-inline: 10px;
+}
+
+.quick-range-row .time-step-btn {
+  min-width: 52px;
+  padding-inline: 8px;
 }
 
 .action-row {
@@ -512,6 +517,14 @@ body {
 .market-toolbar .ant-input-search .ant-input:focus {
   border-color: rgba(23, 143, 152, 0.48);
   background: rgba(255, 255, 255, 0.72);
+}
+
+.market-card .ant-table-cell {
+  white-space: nowrap;
+}
+
+.market-card .ant-table-thead > tr > th {
+  vertical-align: middle;
 }
 
 .market-chart-wrap {
@@ -795,6 +808,11 @@ body {
   .time-row {
     flex-wrap: wrap;
     gap: 8px;
+  }
+
+  .time-line {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .time-row .ant-input {

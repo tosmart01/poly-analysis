@@ -197,6 +197,8 @@ def test_get_result_returns_compact_payload():
         assert payload["markets"][0]["tokens"][0]["buy_amount_usdc"] == 4.2
         assert payload["markets"][0]["tokens"][0]["sell_amount_usdc"] == 2.8
         assert payload["markets"][0]["tokens"][0]["sell_avg_price"] == 0.56
+        assert payload["markets"][0]["tokens"][0]["taker_fee_usdc"] == 0
+        assert payload["markets"][0]["tokens"][0]["maker_reward_usdc"] == 0
         assert payload["artifacts"]["json"] == "/reports/report.json"
 
     asyncio.run(runner())

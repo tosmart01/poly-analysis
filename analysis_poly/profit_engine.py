@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .slugs import market_timestamp_from_slug
+
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Any, Mapping
@@ -40,6 +42,7 @@ class _TokenState:
     token_id: str
     outcome: str
     lots: deque[_Lot]
+    last_trade_timestamp: int | None = None
     buy_cost_usdc: float = 0.0
     sell_amount_usdc: float = 0.0
     realized_pnl_usdc: float = 0.0
@@ -171,6 +174,7 @@ class ProfitEngine:
             if event.kind == "TRADE" and event.token_id in token_states:
                     token_state = token_states[event.token_id]
                     token_state.trade_count += 1
+                    token_state.last_trade_timestamp = event.timestamp
                     delta, new_warnings = self._apply_trade(
                         market=market,
                         market_slug=market.slug,
@@ -224,6 +228,7 @@ class ProfitEngine:
                 TokenReport(
                     token_id=token_state.token_id,
                     outcome=token_state.outcome,
+                    last_trade_timestamp=token_state.last_trade_timestamp,
                     entry_amount_usdc=round(token_state.buy_cost_usdc, 10),
                     avg_entry_price=(
                         round(token_state.avg_entry_price, 10)
@@ -570,10 +575,7 @@ def _resolve_winner_token(market: PolymarketMarket) -> str | None:
 
 
 def _market_ts_from_slug(market_slug: str) -> int | None:
-    try:
-        return int(str(market_slug).rsplit("-", 1)[-1])
-    except Exception:  # noqa: BLE001
-        return None
+    return market_timestamp_from_slug(market_slug)
 
 
 def _settlement_timestamp(market: PolymarketMarket, events: list[_Event]) -> int:

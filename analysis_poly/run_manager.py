@@ -401,6 +401,7 @@ def _compact_token_report(token: TokenReport) -> dict:
     return {
         "token_id": token.token_id,
         "outcome": token.outcome,
+        "last_trade_timestamp": token.last_trade_timestamp,
         "entry_amount_usdc": token.entry_amount_usdc,
         "avg_entry_price": token.avg_entry_price,
         "buy_amount_usdc": token.buy_amount_usdc,
@@ -408,6 +409,8 @@ def _compact_token_report(token: TokenReport) -> dict:
         "sell_amount_usdc": token.sell_amount_usdc,
         "sell_avg_price": token.sell_avg_price,
         "realized_pnl_usdc": token.realized_pnl_usdc,
+        "taker_fee_usdc": token.taker_fee_usdc,
+        "maker_reward_usdc": token.maker_reward_usdc,
         "buy_qty": token.buy_qty,
         "sell_qty": token.sell_qty,
         "redeem_qty": token.redeem_qty,

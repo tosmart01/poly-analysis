@@ -18,6 +18,6 @@ export function buildDefaultForm(serverDefaults, defaultAddressOverride = "") {
     missingCostWarnQty: "0.5",
     activityWindowSec: "7200",
     concurrency: "5",
-    pageLimit: "1000",
+    pageLimit: "500",
   };
 }
