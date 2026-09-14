@@ -103,6 +103,9 @@ class NullHooks:
         return
 
 
+INCOME_ACTIVITY_TYPES = ("MAKER_REBATE", "YIELD", "TAKER_REBATE", "REWARD", "REFERRAL_REWARD")
+
+
 class PolymarketProfitAnalyzer:
     def __init__(self):
         self._market_cache = MarketMetadataCache()
@@ -483,8 +486,8 @@ class PolymarketProfitAnalyzer:
             windows=iter_week_windows(start_ts, end_ts),
             page_limit=capped_page_limit,
             warnings=warnings,
-            activity_types=("MAKER_REBATE",),
-            label="maker_rebate_1w",
+            activity_types=INCOME_ACTIVITY_TYPES,
+            label="income_1w",
         )
         for record in records:
             rebate_value = float(record.usdc_size or record.size or 0.0)
@@ -493,6 +496,8 @@ class PolymarketProfitAnalyzer:
             records_out.append(
                 MakerRebateRecord(
                     timestamp=int(record.timestamp),
+                    type=record.type,
+                    transaction_hash=record.transaction_hash,
                     usdc_size=rebate_value,
                 )
             )

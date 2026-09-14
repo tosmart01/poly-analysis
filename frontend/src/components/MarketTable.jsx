@@ -238,6 +238,7 @@ const columns = [
 ];
 
 const makerRebateColumns = [
+  { title: "Type", dataIndex: "type", key: "type", render: (value) => value || "MAKER_REBATE" },
   {
     title: "Payout Time",
     dataIndex: "timestamp",
@@ -595,17 +596,17 @@ export default function MarketTable({ markets, makerRebates }) {
       </div>
 
       <Divider orientation="left" style={{ margin: "8px 0 12px" }}>
-        Daily Maker Rebate
+        Rewards & Income
       </Divider>
 
       <div className="market-section">
         <Table
           size="small"
-          rowKey={(record) => `${record.timestamp}-${record.usdc_size}`}
+          rowKey={(record) => `${record.type || "MAKER_REBATE"}-${record.transaction_hash || ""}-${record.timestamp}-${record.usdc_size}`}
           columns={makerRebateColumns}
           dataSource={makerRebates || []}
           pagination={{ pageSize: 10 }}
-          locale={{ emptyText: "No maker rebate records" }}
+          locale={{ emptyText: "No income records" }}
           scroll={{ x: 360 }}
           sortDirections={["descend", "ascend"]}
         />

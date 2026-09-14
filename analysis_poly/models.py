@@ -131,6 +131,9 @@ class SummaryStats(BaseModel):
 
 
 class MakerRebateRecord(BaseModel):
+    # Retain the existing report field for compatibility with older clients.
+    type: str = "MAKER_REBATE"
+    transaction_hash: str = ""
     timestamp: int
     usdc_size: float
 

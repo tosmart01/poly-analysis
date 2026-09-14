@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 from analysis_poly.activity_discovery import (
     dedupe_activity_records,
     iter_calendar_day_windows,
@@ -7,7 +9,7 @@ from analysis_poly.activity_discovery import (
     iter_week_windows,
     summarize_discovered_markets,
 )
-from analysis_poly.analyzer import PolymarketProfitAnalyzer
+from analysis_poly.analyzer import INCOME_ACTIVITY_TYPES, PolymarketProfitAnalyzer
 from analysis_poly.models import ActivityRecord, AnalysisRequest, MarketReport, PolymarketMarket, TokenReport
 from analysis_poly.profit_engine import PnlDelta
 
@@ -121,7 +123,7 @@ def test_run_discovers_markets_in_range_and_filters_keywords(monkeypatch):
             (("SPLIT", "REDEEM"), start, end, 0)
             for start, end in iter_calendar_day_windows(10, 86420)
         ] + [
-            (("MAKER_REBATE",), start, end, 0)
+            (INCOME_ACTIVITY_TYPES, start, end, 0)
             for start, end in iter_week_windows(10, 86420)
         ]
         assert fake_client.calls == expected_calls
@@ -257,7 +259,8 @@ def test_run_filters_discovered_markets_by_slug_timestamp(monkeypatch):
     asyncio.run(runner())
 
 
-def test_run_adds_daily_maker_rebate_to_summary_and_total_curve(monkeypatch):
+@pytest.mark.parametrize("income_type", INCOME_ACTIVITY_TYPES)
+def test_run_adds_daily_maker_rebate_to_summary_and_total_curve(monkeypatch, income_type):
     class FakeClient:
         async def get_user_activity_page(
             self,
@@ -284,14 +287,14 @@ def test_run_adds_daily_maker_rebate_to_summary_and_total_curve(monkeypatch):
                         )
                     ]
                 return []
-            if activity_key == ("MAKER_REBATE",):
+            if activity_key == INCOME_ACTIVITY_TYPES:
                 if start_ts == 10 and offset == 0:
                     return [
                         ActivityRecord.model_validate(
                             {
                                 "transactionHash": "0xrebate",
                                 "timestamp": 200,
-                                "type": "MAKER_REBATE",
+                                "type": income_type,
                                 "conditionId": "",
                                 "slug": "",
                                 "size": 23.3977,
@@ -357,8 +360,10 @@ def test_run_adds_daily_maker_rebate_to_summary_and_total_curve(monkeypatch):
         assert report.summary.total_maker_reward_usdc == 23.3977
         assert report.summary.total_realized_pnl_usdc == 24.6477
         assert [point.cumulative_realized_pnl_usdc for point in report.total_curve] == [1.25, 24.6477]
+        assert [point.cumulative_realized_pnl_usdc for point in report.total_curve_no_fee] == [1.25, 24.6477]
+        assert report.summary.total_taker_fee_usdc == 0
         assert report.markets[0].maker_reward_usdc == 0
-        assert [item.model_dump() for item in report.maker_rebates] == [{"timestamp": 200, "usdc_size": 23.3977}]
+        assert [item.model_dump() for item in report.maker_rebates] == [{"type": income_type, "transaction_hash": "0xrebate", "timestamp": 200, "usdc_size": 23.3977}]
 
     asyncio.run(runner())
 
@@ -425,3 +430,33 @@ def test_dedupe_activity_records_ignores_float_field_differences():
     deduped = dedupe_activity_records(records)
 
     assert len(deduped) == 1
+
+
+def test_income_only_run_preserves_distinct_types_in_same_transaction(monkeypatch):
+    class FakeClient:
+        async def get_user_activity_page(self, user, activity_types=None, **kwargs):
+            if tuple(activity_types or []) != INCOME_ACTIVITY_TYPES:
+                return []
+            records = [ActivityRecord.model_validate({
+                'transactionHash': '0xshared', 'timestamp': 200,
+                'type': kind, 'conditionId': '', 'usdcSize': i + 1,
+            }) for i, kind in enumerate(INCOME_ACTIVITY_TYPES)]
+            return records + records  # Overlapping API pages must not double count.
+
+        async def aclose(self):
+            pass
+
+    async def runner():
+        monkeypatch.setattr('analysis_poly.analyzer.PolymarketApiClient', lambda **kwargs: FakeClient())
+        report = await PolymarketProfitAnalyzer().run(AnalysisRequest(
+            address='0xabc', start_ts=100, end_ts=300, keywords=['unrelated'],
+        ))
+        assert report.markets == []
+        assert len(report.maker_rebates) == 5
+        assert report.summary.total_realized_pnl_usdc == 15
+        assert report.summary.total_maker_reward_usdc == 15
+        assert report.summary.total_taker_fee_usdc == 0
+        assert report.total_curve[-1].cumulative_realized_pnl_usdc == 15
+        assert report.total_curve_no_fee[-1].cumulative_realized_pnl_usdc == 15
+
+    asyncio.run(runner())

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.10 - 2026-09-14
+
+- Count YIELD, TAKER_REBATE, REWARD, and REFERRAL_REWARD as pure income alongside MAKER_REBATE in total PnL and both fee-adjusted and no-fee curves.
+- Show income types in the rewards table and preserve transaction hashes in report details.
+- Keep existing maker_rebates and total_maker_reward_usdc report fields compatible; they now include all five income types.
+- Test each income type, income-only accounts, and deduplication across shared transaction hashes.
+
 ## 0.1.9 - 2026-09-06
 
 - Fix sports markets being excluded when calendar-date slug suffixes were interpreted as Unix timestamps.
