@@ -14,6 +14,14 @@ Polymarket 市场 PnL 分析 Web 工具。
 - 适用于 Polymarket 市场通用分析，不仅限于 crypto 市场。
 - 主要目的：量化并可视化真实 PnL、手续费影响、市场级表现，以及 `Net PnL` 对比 `No-Fee PnL`。
 
+## Data API v2
+
+市场发现和回放已使用 `/v2/activity`、`/v2/trades`，按 `pagination.next_cursor` 翻页直到 `null`，中间出现短页或空页也会继续。支持 v2 的 snake_case 字段，并将 `token_id` 映射到回放引擎的 `asset`。Gamma 市场元数据继续使用原接口。
+
+完整活动区间和市场结果改用 `.cache/user_activity_v2`、`.cache/address_market_results_v2` 缓存，首次运行会重新拉取数据，旧缓存文件保留。直接调用 Python 客户端的代码需将 `get_user_activity_page` 的 `offset` 改为 `cursor`，并从返回对象读取 `.data`、`.pagination.next_cursor`。
+
+本地通过代理请求时，在运行 `uv run` 命令前设置 `HTTP_PROXY=http://127.0.0.1:8117`、`HTTPS_PROXY=http://127.0.0.1:8117`。迁移契约见[官方文档](https://docs.polymarket.com/migrate/data-api-v1-to-v2)。
+
 ## 环境要求
 
 - Python `3.11+`（推荐使用 `3.11`）

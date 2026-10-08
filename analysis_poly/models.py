@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Literal
+from typing import Generic, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class RunStatus(str, Enum):
@@ -177,10 +177,12 @@ class PolymarketMarket(BaseModel):
 
 
 class TradeRecord(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     transaction_hash: str = Field(alias="transactionHash")
     timestamp: int
     side: Literal["BUY", "SELL"]
-    asset: str
+    asset: str = Field(validation_alias=AliasChoices("token_id", "asset"))
     condition_id: str = Field(alias="conditionId")
     size: float
     price: float
@@ -188,6 +190,8 @@ class TradeRecord(BaseModel):
 
 
 class ActivityRecord(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     transaction_hash: str = Field(alias="transactionHash")
     timestamp: int
     type: str
@@ -195,6 +199,18 @@ class ActivityRecord(BaseModel):
     slug: str = ""
     size: float = 0
     usdc_size: float = Field(default=0, alias="usdcSize")
+
+
+RecordT = TypeVar("RecordT")
+
+
+class DataApiPagination(BaseModel):
+    next_cursor: str | None
+
+
+class DataApiPage(BaseModel, Generic[RecordT]):
+    data: list[RecordT]
+    pagination: DataApiPagination
 
 
 class StreamEvent(BaseModel):

@@ -1,3 +1,4 @@
+from analysis_poly.models import DataApiPage, DataApiPagination
 import asyncio
 
 import pytest
@@ -26,14 +27,14 @@ def test_run_discovers_markets_in_range_and_filters_keywords(monkeypatch):
             start_ts=None,
             end_ts=None,
             limit=500,
-            offset=0,
+            cursor=None,
             sort_direction="ASC",
         ):
             activity_key = tuple(activity_types or [])
-            self.calls.append((activity_key, start_ts, end_ts, offset))
+            self.calls.append((activity_key, start_ts, end_ts, cursor))
             pages = {
                 (("TRADE",), 10, 7199): {
-                    0: [
+                    None: [
                         ActivityRecord.model_validate(
                             {
                                 "transactionHash": "0xa",
@@ -46,7 +47,7 @@ def test_run_discovers_markets_in_range_and_filters_keywords(monkeypatch):
                     ]
                 },
                 (("TRADE",), 86400, 86420): {
-                    0: [
+                    None: [
                         ActivityRecord.model_validate(
                             {
                                 "transactionHash": "0xb",
@@ -59,7 +60,7 @@ def test_run_discovers_markets_in_range_and_filters_keywords(monkeypatch):
                     ]
                 },
             }
-            return pages.get((activity_key, start_ts, end_ts), {}).get(offset, [])
+            return DataApiPage(data=pages.get((activity_key, start_ts, end_ts), {}).get(cursor, []), pagination=DataApiPagination(next_cursor=None))
 
         async def aclose(self):
             return
@@ -117,13 +118,13 @@ def test_run_discovers_markets_in_range_and_filters_keywords(monkeypatch):
         )
 
         expected_calls = [
-            (("TRADE",), start, end, 0)
+            (("TRADE",), start, end, None)
             for start, end in iter_day_windows(10, 86420)
         ] + [
-            (("SPLIT", "REDEEM"), start, end, 0)
+            (("SPLIT", "REDEEM"), start, end, None)
             for start, end in iter_calendar_day_windows(10, 86420)
         ] + [
-            (INCOME_ACTIVITY_TYPES, start, end, 0)
+            (INCOME_ACTIVITY_TYPES, start, end, None)
             for start, end in iter_week_windows(10, 86420)
         ]
         assert fake_client.calls == expected_calls
@@ -164,12 +165,12 @@ def test_run_filters_discovered_markets_by_slug_timestamp(monkeypatch):
             start_ts=None,
             end_ts=None,
             limit=500,
-            offset=0,
+            cursor=None,
             sort_direction="ASC",
         ):
             activity_key = tuple(activity_types or [])
             if activity_key == ("SPLIT", "REDEEM"):
-                return [
+                return DataApiPage(data=[
                     ActivityRecord.model_validate(
                         {
                             "transactionHash": "0xold_redeem",
@@ -181,9 +182,9 @@ def test_run_filters_discovered_markets_by_slug_timestamp(monkeypatch):
                             "usdcSize": 1,
                         }
                     ),
-                ]
+                ], pagination=DataApiPagination(next_cursor=None))
             if activity_key == ("TRADE",):
-                return [
+                return DataApiPage(data=[
                     ActivityRecord.model_validate(
                         {
                             "transactionHash": "0xlive_trade",
@@ -195,8 +196,8 @@ def test_run_filters_discovered_markets_by_slug_timestamp(monkeypatch):
                             "usdcSize": 0.5,
                         }
                     ),
-                ]
-            return []
+                ], pagination=DataApiPagination(next_cursor=None))
+            return DataApiPage(data=[], pagination=DataApiPagination(next_cursor=None))
 
         async def aclose(self):
             return
@@ -269,13 +270,13 @@ def test_run_adds_daily_maker_rebate_to_summary_and_total_curve(monkeypatch, inc
             start_ts=None,
             end_ts=None,
             limit=500,
-            offset=0,
+            cursor=None,
             sort_direction="ASC",
         ):
             activity_key = tuple(activity_types or [])
             if activity_key == ("TRADE",):
-                if start_ts == 10 and offset == 0:
-                    return [
+                if start_ts == 10 and cursor is None:
+                    return DataApiPage(data=[
                         ActivityRecord.model_validate(
                             {
                                 "transactionHash": "0xa",
@@ -285,11 +286,11 @@ def test_run_adds_daily_maker_rebate_to_summary_and_total_curve(monkeypatch, inc
                                 "slug": "eth-updown-15m-100",
                             }
                         )
-                    ]
-                return []
+                    ], pagination=DataApiPagination(next_cursor=None))
+                return DataApiPage(data=[], pagination=DataApiPagination(next_cursor=None))
             if activity_key == INCOME_ACTIVITY_TYPES:
-                if start_ts == 10 and offset == 0:
-                    return [
+                if start_ts == 10 and cursor is None:
+                    return DataApiPage(data=[
                         ActivityRecord.model_validate(
                             {
                                 "transactionHash": "0xrebate",
@@ -301,9 +302,9 @@ def test_run_adds_daily_maker_rebate_to_summary_and_total_curve(monkeypatch, inc
                                 "usdcSize": 23.3977,
                             }
                         )
-                    ]
-                return []
-            return []
+                    ], pagination=DataApiPagination(next_cursor=None))
+                return DataApiPage(data=[], pagination=DataApiPagination(next_cursor=None))
+            return DataApiPage(data=[], pagination=DataApiPagination(next_cursor=None))
 
         async def aclose(self):
             return
@@ -436,12 +437,12 @@ def test_income_only_run_preserves_distinct_types_in_same_transaction(monkeypatc
     class FakeClient:
         async def get_user_activity_page(self, user, activity_types=None, **kwargs):
             if tuple(activity_types or []) != INCOME_ACTIVITY_TYPES:
-                return []
+                return DataApiPage(data=[], pagination=DataApiPagination(next_cursor=None))
             records = [ActivityRecord.model_validate({
                 'transactionHash': '0xshared', 'timestamp': 200,
                 'type': kind, 'conditionId': '', 'usdcSize': i + 1,
             }) for i, kind in enumerate(INCOME_ACTIVITY_TYPES)]
-            return records + records  # Overlapping API pages must not double count.
+            return DataApiPage(data=records + records, pagination=DataApiPagination(next_cursor=None))  # Overlapping API pages must not double count.
 
         async def aclose(self):
             pass

@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 class AddressMarketResultCache:
-    def __init__(self, cache_dir: str | Path = ".cache/address_market_results"):
+    def __init__(self, cache_dir: str | Path = ".cache/address_market_results_v2"):
         self._cache_dir = Path(cache_dir)
         self._cache_dir.mkdir(parents=True, exist_ok=True)
 

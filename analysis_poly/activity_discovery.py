@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import time
 from dataclasses import dataclass
 
@@ -10,7 +9,6 @@ from .models import WarningItem
 
 DISCOVERY_ACTIVITY_TYPES = ("TRADE", "SPLIT", "REDEEM")
 DISCOVERY_ACTIVITY_PAGE_LIMIT_MAX = 500
-DISCOVERY_ACTIVITY_OFFSET_MAX = 10000
 DISCOVERY_ACTIVITY_WINDOW_SEC = 2 * 60 * 60
 DAY_WINDOW_SEC = 24 * 60 * 60
 WEEK_WINDOW_SEC = 7 * DAY_WINDOW_SEC
@@ -119,8 +117,8 @@ async def collect_user_activity(
         return deduped
 
     records: list = []
-    offset = 0
-    reached_offset_cap = False
+    cursor = None
+    seen_cursors: set[str] = set()
     request_count = 0
 
     while True:
@@ -131,55 +129,21 @@ async def collect_user_activity(
             start_ts=start_ts,
             end_ts=end_ts,
             limit=page_limit,
-            offset=offset,
+            cursor=cursor,
             sort_direction="ASC",
         )
-        if not page:
+        records.extend(page.data)
+        cursor = page.pagination.next_cursor
+        if cursor is None:
             break
-        records.extend(page)
-        if len(page) < page_limit:
-            break
-        offset += len(page)
-        if offset > DISCOVERY_ACTIVITY_OFFSET_MAX:
-            reached_offset_cap = True
-            break
+        if cursor in seen_cursors:
+            raise RuntimeError("Data API v2 activity returned a repeated cursor")
+        seen_cursors.add(cursor)
 
-    if not reached_offset_cap:
-        deduped = dedupe_activity_records(records)
-        if log_detail:
-            logger.info(
-                "activity collect done address={} types={} range=[{}, {}] requests={} records={} deduped={} elapsed_sec={:.3f}",
-                address,
-                ",".join(normalized_activity_types),
-                start_ts,
-                end_ts,
-                request_count,
-                len(records),
-                len(deduped),
-                time.perf_counter() - started,
-            )
-        if cache is not None and start_ts is not None and end_ts is not None and cache.is_cache_eligible(end_ts=end_ts, now_ts=now_ts):
-            cache.save_range(
-                user=address,
-                activity_types=normalized_activity_types,
-                start_ts=start_ts,
-                end_ts=end_ts,
-                sort_direction="ASC",
-                records=deduped,
-            )
-        return deduped
-
-    if end_ts - start_ts <= 1:
-        warnings.append(
-            WarningItem(
-                timestamp=start_ts,
-                code="DISCOVERY_WINDOW_TRUNCATED",
-                message="user activity window is too dense to split further; discovery may be incomplete",
-            )
-        )
-        deduped = dedupe_activity_records(records)
-        logger.warning(
-            "activity collect truncated address={} types={} range=[{}, {}] requests={} records={} deduped={} elapsed_sec={:.3f}",
+    deduped = dedupe_activity_records(records)
+    if log_detail:
+        logger.info(
+            "activity collect done address={} types={} range=[{}, {}] requests={} records={} deduped={} elapsed_sec={:.3f}",
             address,
             ",".join(normalized_activity_types),
             start_ts,
@@ -189,46 +153,7 @@ async def collect_user_activity(
             len(deduped),
             time.perf_counter() - started,
         )
-        return deduped
-
-    split_ts = start_ts + ((end_ts - start_ts) // 2)
-    logger.info(
-        "activity collect split address={} types={} range=[{}, {}] requests={} records={} split_ts={} elapsed_sec={:.3f}",
-        address,
-        ",".join(normalized_activity_types),
-        start_ts,
-        end_ts,
-        request_count,
-        len(records),
-        split_ts,
-        time.perf_counter() - started,
-    )
-    left_records, right_records = await asyncio.gather(
-        collect_user_activity(
-            client=client,
-            address=address,
-            start_ts=start_ts,
-            end_ts=split_ts,
-            page_limit=page_limit,
-            warnings=warnings,
-            activity_types=activity_types,
-            log_detail=log_detail,
-            allow_range_cache=False,
-        ),
-        collect_user_activity(
-            client=client,
-            address=address,
-            start_ts=split_ts + 1,
-            end_ts=end_ts,
-            page_limit=page_limit,
-            warnings=warnings,
-            activity_types=activity_types,
-            log_detail=log_detail,
-            allow_range_cache=False,
-        ),
-    )
-    deduped = dedupe_activity_records([*left_records, *right_records])
-    if cache is not None and start_ts is not None and end_ts is not None and cache.is_cache_eligible(end_ts=end_ts, now_ts=now_ts):
+    if cache is not None and cache.is_cache_eligible(end_ts=end_ts, now_ts=now_ts):
         cache.save_range(
             user=address,
             activity_types=normalized_activity_types,

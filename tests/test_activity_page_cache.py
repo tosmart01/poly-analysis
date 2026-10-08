@@ -1,50 +1,9 @@
+from analysis_poly.models import DataApiPage, DataApiPagination
 import asyncio
 
 from analysis_poly.activity_page_cache import UserActivityPageCache
 from analysis_poly.activity_discovery import collect_user_activity, collect_user_activity_for_windows
 from analysis_poly.models import ActivityRecord
-from analysis_poly.polymarket_client import PolymarketApiClient
-
-
-def test_user_activity_page_cache_roundtrip(tmp_path):
-    cache = UserActivityPageCache(cache_dir=tmp_path / "activity_cache", recent_window_sec=1800)
-    records = [
-        ActivityRecord.model_validate(
-            {
-                "transactionHash": "0x1",
-                "timestamp": 100,
-                "type": "TRADE",
-                "conditionId": "cond",
-                "slug": "btc-updown-5m-100",
-                "size": 1,
-                "usdcSize": 0.5,
-            }
-        )
-    ]
-
-    cache.save(
-        user="0xabc",
-        activity_types=["TRADE", "REDEEM"],
-        start_ts=10,
-        end_ts=20,
-        limit=500,
-        offset=0,
-        sort_direction="ASC",
-        records=records,
-    )
-    loaded = cache.load(
-        user="0xabc",
-        activity_types=["TRADE", "REDEEM"],
-        start_ts=10,
-        end_ts=20,
-        limit=500,
-        offset=0,
-        sort_direction="ASC",
-    )
-
-    assert loaded is not None
-    assert len(loaded) == 1
-    assert loaded[0].transaction_hash == "0x1"
 
 
 def test_user_activity_page_cache_eligibility():
@@ -173,68 +132,6 @@ def test_user_activity_range_cache_merges_adjacent_entries_before_slack(tmp_path
     assert missing == [(8000, 10599), (29401, 32000)]
 
 
-def test_polymarket_client_get_user_activity_page_hits_cache_for_stale_window(monkeypatch, tmp_path):
-    async def runner():
-        client = PolymarketApiClient(timeout_sec=20)
-        client._activity_page_cache = UserActivityPageCache(
-            cache_dir=tmp_path / "activity_cache",
-            recent_window_sec=1800,
-        )
-
-        call_count = 0
-
-        async def fake_request_json(method, url, params=None):
-            nonlocal call_count
-            call_count += 1
-            return [
-                {
-                    "transactionHash": "0x1",
-                    "timestamp": 100,
-                    "type": "TRADE",
-                    "conditionId": "cond",
-                    "slug": "btc-updown-5m-100",
-                    "size": 1,
-                    "usdcSize": 0.5,
-                }
-            ]
-
-        class FakeDateTime:
-            @classmethod
-            def now(cls, tz=None):
-                from datetime import datetime, timezone
-
-                return datetime.fromtimestamp(4000, timezone.utc)
-
-        monkeypatch.setattr("analysis_poly.polymarket_client.datetime", FakeDateTime)
-        monkeypatch.setattr(client, "_request_json", fake_request_json)
-
-        first = await client.get_user_activity_page(
-            user="0xabc",
-            activity_types=["TRADE"],
-            start_ts=10,
-            end_ts=1000,
-            limit=500,
-            offset=0,
-            sort_direction="ASC",
-        )
-        second = await client.get_user_activity_page(
-            user="0xabc",
-            activity_types=["TRADE"],
-            start_ts=10,
-            end_ts=1000,
-            limit=500,
-            offset=0,
-            sort_direction="ASC",
-        )
-
-        assert call_count == 1
-        assert len(first) == 1
-        assert len(second) == 1
-        assert second[0].transaction_hash == "0x1"
-
-    asyncio.run(runner())
-
-
 def test_collect_user_activity_reuses_cached_range_and_fetches_only_missing_segments(tmp_path):
     async def runner():
         master_records = [
@@ -310,17 +207,17 @@ def test_collect_user_activity_reuses_cached_range_and_fetches_only_missing_segm
                 start_ts=None,
                 end_ts=None,
                 limit=500,
-                offset=0,
+                cursor=None,
                 sort_direction="ASC",
             ):
-                self.calls.append((tuple(activity_types or []), start_ts, end_ts, offset))
-                if offset != 0:
-                    return []
-                return [
+                self.calls.append((tuple(activity_types or []), start_ts, end_ts, cursor))
+                if cursor is not None:
+                    return DataApiPage(data=[], pagination=DataApiPagination(next_cursor=None))
+                return DataApiPage(data=[
                     record
                     for record in master_records
                     if start_ts <= int(record.timestamp) <= end_ts
-                ]
+                ], pagination=DataApiPagination(next_cursor=None))
 
         client = FakeClient()
         warnings = []
@@ -347,9 +244,9 @@ def test_collect_user_activity_reuses_cached_range_and_fetches_only_missing_segm
         assert [record.transaction_hash for record in first] == ["0xmid1", "0xmid2", "0xmid3", "0xtail"]
         assert [record.transaction_hash for record in second] == ["0xhead", "0xmid1", "0xmid2", "0xmid3", "0xtail"]
         assert client.calls == [
-            (("TRADE",), 10000, 30000, 0),
-            (("TRADE",), 8000, 10599, 0),
-            (("TRADE",), 29401, 32000, 0),
+            (("TRADE",), 10000, 30000, None),
+            (("TRADE",), 8000, 10599, None),
+            (("TRADE",), 29401, 32000, None),
         ]
 
     asyncio.run(runner())
@@ -419,17 +316,17 @@ def test_collect_user_activity_for_windows_fetches_only_missing_window_segments(
                 start_ts=None,
                 end_ts=None,
                 limit=500,
-                offset=0,
+                cursor=None,
                 sort_direction="ASC",
             ):
-                self.calls.append((tuple(activity_types or []), start_ts, end_ts, offset))
-                if offset != 0:
-                    return []
-                return [
+                self.calls.append((tuple(activity_types or []), start_ts, end_ts, cursor))
+                if cursor is not None:
+                    return DataApiPage(data=[], pagination=DataApiPagination(next_cursor=None))
+                return DataApiPage(data=[
                     record
                     for record in master_records
                     if start_ts <= int(record.timestamp) <= end_ts
-                ]
+                ], pagination=DataApiPagination(next_cursor=None))
 
         client = FakeClient()
         client._activity_page_cache.save_range(
@@ -453,8 +350,8 @@ def test_collect_user_activity_for_windows_fetches_only_missing_window_segments(
 
         assert [record.transaction_hash for record in records] == ["0xhead", "0xmid1", "0xmid2", "0xtail"]
         assert client.calls == [
-            (("TRADE",), 8000, 10599, 0),
-            (("TRADE",), 29401, 32000, 0),
+            (("TRADE",), 8000, 10599, None),
+            (("TRADE",), 29401, 32000, None),
         ]
 
     asyncio.run(runner())
@@ -513,17 +410,17 @@ def test_collect_user_activity_for_windows_reuses_stale_cache_when_overall_end_i
                 start_ts=None,
                 end_ts=None,
                 limit=500,
-                offset=0,
+                cursor=None,
                 sort_direction="ASC",
             ):
-                self.calls.append((tuple(activity_types or []), start_ts, end_ts, offset))
-                if offset != 0:
-                    return []
-                return [
+                self.calls.append((tuple(activity_types or []), start_ts, end_ts, cursor))
+                if cursor is not None:
+                    return DataApiPage(data=[], pagination=DataApiPagination(next_cursor=None))
+                return DataApiPage(data=[
                     record
                     for record in master_records
                     if start_ts <= int(record.timestamp) <= end_ts
-                ]
+                ], pagination=DataApiPagination(next_cursor=None))
 
         client = FakeClient()
         client._activity_page_cache.save_range(
@@ -548,8 +445,8 @@ def test_collect_user_activity_for_windows_reuses_stale_cache_when_overall_end_i
 
         assert [record.transaction_hash for record in records] == ["0xhead", "0xmid", "0xtail"]
         assert client.calls == [
-            (("TRADE",), 8000, 10599, 0),
-            (("TRADE",), 29401, 39500, 0),
+            (("TRADE",), 8000, 10599, None),
+            (("TRADE",), 29401, 39500, None),
         ]
 
     asyncio.run(runner())

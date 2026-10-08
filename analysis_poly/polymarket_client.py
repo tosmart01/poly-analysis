@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
 from typing import Any
 
 import httpx
 
 from .activity_page_cache import UserActivityPageCache
-from .models import ActivityRecord, PolymarketMarket, TradeRecord
+from .models import ActivityRecord, DataApiPage, PolymarketMarket, RecordT, TradeRecord
 
 
 class PolymarketApiClient:
@@ -15,7 +14,7 @@ class PolymarketApiClient:
         self._timeout_sec = timeout_sec
         self._retries = retries
         self._gamma_base = "https://gamma-api.polymarket.com"
-        self._data_base = "https://data-api.polymarket.com"
+        self._data_base = "https://data-api.polymarket.com/v2"
         self._client = httpx.AsyncClient(timeout=timeout_sec)
         self._activity_page_cache = UserActivityPageCache()
 
@@ -80,25 +79,14 @@ class PolymarketApiClient:
         taker_only: bool,
         limit: int = 1000,
     ) -> list[TradeRecord]:
-        records: list[TradeRecord] = []
-        offset = 0
-        while True:
-            params = {
-                "user": user,
-                "market": market,
-                "takerOnly": str(taker_only).lower(),
-                "limit": limit,
-                "offset": offset,
-            }
-            data = await self._request_json("GET", f"{self._data_base}/trades", params=params)
-            if not data:
-                break
-            page = [TradeRecord.model_validate(item) for item in data]
-            records.extend(page)
-            if len(page) < limit:
-                break
-            offset += len(page)
-        return records
+        params = {
+            "user": user,
+            "condition": market,
+            "taker_only": str(taker_only).lower(),
+            "limit": _page_limit(limit),
+            "start": 1,
+        }
+        return await self._collect_pages("trades", params, TradeRecord)
 
     async def get_activity(
         self,
@@ -107,27 +95,33 @@ class PolymarketApiClient:
         activity_type: str,
         limit: int = 1000,
     ) -> list[ActivityRecord]:
-        records: list[ActivityRecord] = []
-        offset = 0
+        params = {
+            "user": user,
+            "condition": market,
+            "type": activity_type,
+            "sort_by": "TIMESTAMP",
+            "sort_direction": "ASC",
+            "limit": _page_limit(limit),
+            "start": 1,
+        }
+        return await self._collect_pages("activity", params, ActivityRecord)
+
+    async def _collect_pages(
+        self, route: str, params: dict[str, Any], record_type: type[RecordT]
+    ) -> list[RecordT]:
+        records: list[RecordT] = []
+        seen_cursors: set[str] = set()
         while True:
-            params = {
-                "user": user,
-                "market": market,
-                "type": activity_type,
-                "sortBy": "TIMESTAMP",
-                "sortDirection": "ASC",
-                "limit": limit,
-                "offset": offset,
-            }
-            data = await self._request_json("GET", f"{self._data_base}/activity", params=params)
-            if not data:
-                break
-            page = [ActivityRecord.model_validate(item) for item in data]
-            records.extend(page)
-            if len(page) < limit:
-                break
-            offset += len(page)
-        return records
+            data = await self._request_json("GET", f"{self._data_base}/{route}", params=params)
+            page = DataApiPage[record_type].model_validate(data)
+            records.extend(page.data)
+            cursor = page.pagination.next_cursor
+            if cursor is None:
+                return records
+            if cursor in seen_cursors:
+                raise RuntimeError(f"Data API v2 {route} returned a repeated cursor")
+            seen_cursors.add(cursor)
+            params = {**params, "cursor": cursor}
 
     async def get_user_activity_page(
         self,
@@ -136,55 +130,31 @@ class PolymarketApiClient:
         start_ts: int | None = None,
         end_ts: int | None = None,
         limit: int = 500,
-        offset: int = 0,
+        cursor: str | None = None,
         sort_direction: str = "ASC",
-    ) -> list[ActivityRecord]:
-        now_ts = int(datetime.now(timezone.utc).timestamp())
-        use_cache = self._activity_page_cache.is_cache_eligible(end_ts=end_ts, now_ts=now_ts)
-        if use_cache:
-            cached = self._activity_page_cache.load(
-                user=user,
-                activity_types=activity_types,
-                start_ts=start_ts,
-                end_ts=end_ts,
-                limit=limit,
-                offset=offset,
-                sort_direction=sort_direction,
-            )
-            if cached is not None:
-                return cached
-
+    ) -> DataApiPage[ActivityRecord]:
+        # Cache only completed time ranges; cursors stay request-local.
         params: dict[str, Any] = {
             "user": user,
-            "sortBy": "TIMESTAMP",
-            "sortDirection": sort_direction,
-            "limit": limit,
-            "offset": offset,
+            "sort_by": "TIMESTAMP",
+            "sort_direction": sort_direction,
+            "limit": _page_limit(limit),
+            "start": start_ts if start_ts is not None else 1,
         }
+        if cursor is not None:
+            params["cursor"] = cursor
         if activity_types:
             params["type"] = ",".join(str(item).strip().upper() for item in activity_types if str(item).strip())
-        if start_ts is not None:
-            params["start"] = start_ts
         if end_ts is not None:
             params["end"] = end_ts
-
         data = await self._request_json("GET", f"{self._data_base}/activity", params=params)
-        if not data:
-            return []
-        records = [ActivityRecord.model_validate(item) for item in data]
-        if use_cache:
-            self._activity_page_cache.save(
-                user=user,
-                activity_types=activity_types,
-                start_ts=start_ts,
-                end_ts=end_ts,
-                limit=limit,
-                offset=offset,
-                sort_direction=sort_direction,
-                records=records,
-            )
-        return records
+        return DataApiPage[ActivityRecord].model_validate(data)
 
+
+def _page_limit(limit: int) -> int:
+    if not 1 <= limit <= 1000:
+        raise ValueError("Data API v2 page limit must be between 1 and 1000")
+    return limit
 
 
 def _parse_json_field(raw: Any, fallback: list[Any]) -> list[Any]:

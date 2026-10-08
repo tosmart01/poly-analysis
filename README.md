@@ -16,6 +16,14 @@ Polymarket market PnL analyzer with a web UI.
 - It is intended for Polymarket market analysis in general, including but not limited to crypto markets.
 - Main purpose: quantify and visualize realized PnL, fee impact, market-level performance, and `Net PnL` vs `No-Fee PnL`.
 
+## Data API v2
+
+Activity discovery and market replay use `/v2/activity` and `/v2/trades`, following `pagination.next_cursor` until `null`, including short or empty intermediate pages. Responses accept v2 snake_case fields and map `token_id` to the replay engine's `asset` field. Gamma market metadata remains on its existing API.
+
+Completed activity ranges and market results use fresh caches at `.cache/user_activity_v2` and `.cache/address_market_results_v2`. The first run refetches data; old cache files are preserved. Direct Python callers of `get_user_activity_page` must pass `cursor` instead of `offset` and read `.data` and `.pagination.next_cursor` from the returned page.
+
+For local requests through a proxy, set `HTTP_PROXY=http://127.0.0.1:8117` and `HTTPS_PROXY=http://127.0.0.1:8117` before running `uv run` commands. See the [official migration guide](https://docs.polymarket.com/migrate/data-api-v1-to-v2).
+
 ## Requirements
 
 - Python `3.11+` (recommended: `3.11`)

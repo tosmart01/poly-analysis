@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.11 - 2026-10-08
+
+- Migrate activity discovery and trade replay to Data API v2 response envelopes, snake_case fields, condition filters, and cursor pagination.
+- Remove offset limits and recursive dense-window splitting; follow cursors through short or empty pages and reject repeated cursors or invalid envelopes.
+- Cache only completed activity ranges and isolate activity/result caches from v1 data while retaining legacy record parsing.
+- Verify cursor boundaries, more than 10,000 activity rows, and end-to-end analysis with a live wallet through the configured HTTP proxy.
+
 ## 0.1.10 - 2026-09-14
 
 - Count YIELD, TAKER_REBATE, REWARD, and REFERRAL_REWARD as pure income alongside MAKER_REBATE in total PnL and both fee-adjusted and no-fee curves.
